@@ -47,3 +47,25 @@ class ProjectionModel:
         df = df.copy()
         df["predicted_points"] = self.model.predict(X)
         return df
+    
+    def evaluate_by_position(self, df: pd.DataFrame):
+        X = df[self.feature_cols]
+        y = df["next_week_points"]
+
+        df = df.copy()
+        df["predicted_points"] = self.model.predict(X)
+        df["absolute_error"] = (df["next_week_points"] - df["predicted_points"]).abs()
+
+        results = (
+            df.groupby("position")["absolute_error"]
+            .mean()
+            .sort_values()
+        )
+
+        return results
+    
+    def feature_importance(self):
+        return pd.DataFrame({
+            "feature": self.feature_cols,
+            "importance": self.model.feature_importances_
+        }).sort_values("importance", ascending=False)
