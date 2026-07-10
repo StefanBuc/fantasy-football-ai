@@ -1,12 +1,16 @@
 import pandas as pd
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
 class TrainingData:
     def __init__(self, df:pd.DataFrame):
         self.df = df.copy()
         
     def build_next_week_dataset(self):
-        cache_file = Path("cache") / "training_data.parquet"
+        seasons = "_".join(map(str,self.df["season"].unique()))
+
+        cache_file = BASE_DIR / "cache" / f"training_{seasons}.parquet"
 
         if cache_file.exists():
             print("Loading cached training dataset...")
@@ -62,10 +66,10 @@ class TrainingData:
 
         model_df = df.dropna()
         
-        cache_dir = Path("cache")
+        cache_dir = BASE_DIR / "cache"
         
         cache_dir.mkdir(exist_ok=True)
 
-        model_df.to_parquet(cache_dir / "training_data.parquet", index=False)
+        model_df.to_parquet(cache_file, index=False)
 
         return model_df

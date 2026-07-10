@@ -4,6 +4,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 import joblib
 from pathlib import Path
+import json
 
 
 POSITION_BASE_COLS = {
@@ -61,6 +62,8 @@ BASE_COLS = [
 ]
 
 WINDOWS = ["last1", "last3", "last5", "season_avg"]
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class ProjectionModel:
     def __init__(self, position: str | None = None):
@@ -137,15 +140,19 @@ class ProjectionModel:
             "importance": self.model.feature_importances_
         }).sort_values("importance", ascending=False)
         
-    def save_model(self, file_name: str):
-        model_dir = Path("models")
+    def save_model(self, file_name: str, metadata: dict | None = None):
+        model_dir = BASE_DIR / "models"
         model_dir.mkdir(exist_ok=True)
 
-        file_path = model_dir / file_name
-        joblib.dump(self.model, file_path)
+        model_path = model_dir / file_name
+        metadata_path = model_dir / f"{file_name.replace('.joblib', '_metadata.json')}"
+        joblib.dump(self.model, model_path)
+        
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=4)
 
     def load_model(self, file_name: str):
-        file_path = Path("models") / file_name
+        file_path = BASE_DIR / "models" / file_name
 
         if not file_path.exists():
             return False
