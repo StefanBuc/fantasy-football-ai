@@ -7,7 +7,7 @@ class PlayerFeatures:
     def __init__(self, player_df:pd.DataFrame):
         self.player_df = player_df.copy()
 
-    def build_next_week_dataset(self):
+    def build_offence_features(self):
         seasons = "_".join(map(str,self.player_df["season"].unique()))
 
         cache_file = BASE_DIR / "cache" / f"player_features_{seasons}.parquet"

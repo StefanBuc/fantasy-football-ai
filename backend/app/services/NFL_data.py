@@ -13,7 +13,7 @@ class NFLData:
         print("Data loaded!")
         
         
-    def get_player_pool(self):
+    def get_player_stats(self):
         if self.weekly is None:
             raise ValueError("Weekly data has not been loaded. Call load_data() first.")
 
@@ -74,11 +74,27 @@ class NFLData:
                     "passing_tds",
                     "rushing_tds",
                     "receiving_tds",
-                    "fantasy_points_ppr"
+                    "fantasy_points_ppr",
+                    "targets",
+                    "receptions",
                 ]
             ]
             .sum()
             .reset_index()
+        )
+        
+        defense = defense.rename(
+            columns={
+                "passing_yards": "passing_yards_allowed",
+                "rushing_yards": "rushing_yards_allowed",
+                "receiving_yards": "receiving_yards_allowed",
+                "passing_tds": "passing_tds_allowed",
+                "rushing_tds": "rushing_tds_allowed",
+                "receiving_tds": "receiving_tds_allowed",
+                "fantasy_points_ppr": "fantasy_points_ppr_allowed",
+                "targets": "targets_allowed",
+                "receptions": "receptions_allowed",
+            }
         )
         
         return defense

@@ -15,6 +15,13 @@ POSITION_BASE_COLS = {
         "rushing_yards",
         "rushing_tds",
         "carries",
+        "passing_yards_allowed",
+        "passing_tds_allowed",
+        "fantasy_points_ppr_allowed",
+        "rushing_yards_allowed",
+        "rushing_tds_allowed",
+        "targets_allowed",
+        "receptions_allowed",
     ],
     "RB": [
         "fantasy_points_ppr",
@@ -25,6 +32,11 @@ POSITION_BASE_COLS = {
         "receptions",
         "receiving_yards",
         "receiving_tds",
+        "rushing_yards_allowed",
+        "rushing_tds_allowed",
+        "receiving_yards_allowed",
+        "receiving_tds_allowed",
+        "fantasy_points_ppr_allowed",
     ],
     "WR": [
         "fantasy_points_ppr",
@@ -34,6 +46,11 @@ POSITION_BASE_COLS = {
         "receiving_tds",
         "target_share",
         "wopr",
+        "receiving_yards_allowed",
+        "receiving_tds_allowed",
+        "fantasy_points_ppr_allowed",
+        "targets_allowed",
+        "receptions_allowed",
     ],
     "TE": [
         "fantasy_points_ppr",
@@ -43,6 +60,11 @@ POSITION_BASE_COLS = {
         "receiving_tds",
         "target_share",
         "wopr",
+        "receiving_yards_allowed",
+        "receiving_tds_allowed",
+        "fantasy_points_ppr_allowed",
+        "targets_allowed",
+        "receptions_allowed",
     ],
 }
 
@@ -69,9 +91,11 @@ class ProjectionModel:
     def __init__(self, position: str | None = None):
         self.position = position
         self.model = XGBRegressor(
-            n_estimators=100,
-            learning_rate=0.05,
+            n_estimators=300,
+            learning_rate=0.03,
             max_depth=4,
+            subsample=0.8,
+            colsample_bytree=0.8,
             random_state=42
         )
         
@@ -85,6 +109,14 @@ class ProjectionModel:
             for col in selected_base_cols
             for window in WINDOWS
         ]
+
+        relative_cols = [
+            f"{col}_relative"
+            for col in self.feature_cols
+            if "_allowed" in col and not "last1" in col
+        ]
+
+        self.feature_cols.extend(relative_cols)
             
     
     def train(self, df: pd.DataFrame, test_season: int | None = None):
