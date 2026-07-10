@@ -3,21 +3,20 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-class TrainingData:
-    def __init__(self, df:pd.DataFrame):
-        self.df = df.copy()
-        
-    def build_next_week_dataset(self):
-        seasons = "_".join(map(str,self.df["season"].unique()))
+class PlayerFeatures:
+    def __init__(self, player_df:pd.DataFrame):
+        self.player_df = player_df.copy()
 
-        cache_file = BASE_DIR / "cache" / f"training_{seasons}.parquet"
+    def build_next_week_dataset(self):
+        seasons = "_".join(map(str,self.player_df["season"].unique()))
+
+        cache_file = BASE_DIR / "cache" / f"player_features_{seasons}.parquet"
 
         if cache_file.exists():
-            print("Loading cached training dataset...")
+            print("Loading cached player features dataset...")
             return pd.read_parquet(cache_file)
         
-        df = self.df.copy()
-        
+        df = self.player_df.copy()
         df = df[df["position"].isin(["QB", "RB", "WR", "TE"])]
         df = df[df["season_type"] == "REG"]
         df = df.fillna(0)
@@ -67,9 +66,7 @@ class TrainingData:
         model_df = df.dropna()
         
         cache_dir = BASE_DIR / "cache"
-        
         cache_dir.mkdir(exist_ok=True)
-
         model_df.to_parquet(cache_file, index=False)
 
         return model_df

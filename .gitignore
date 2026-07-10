@@ -9,6 +9,7 @@ models/
 # C extensions
 *.so
 test.py
+test2.py
 
 # Distribution / packaging
 .Python
