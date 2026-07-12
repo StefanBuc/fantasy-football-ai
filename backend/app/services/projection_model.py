@@ -37,6 +37,7 @@ POSITION_BASE_COLS = {
         "receiving_yards_allowed",
         "receiving_tds_allowed",
         "fantasy_points_ppr_allowed",
+        "offense_pct",
     ],
     "WR": [
         "fantasy_points_ppr",
@@ -51,6 +52,7 @@ POSITION_BASE_COLS = {
         "fantasy_points_ppr_allowed",
         "targets_allowed",
         "receptions_allowed",
+        "offense_pct",
     ],
     "TE": [
         "fantasy_points_ppr",
@@ -65,6 +67,7 @@ POSITION_BASE_COLS = {
         "fantasy_points_ppr_allowed",
         "targets_allowed",
         "receptions_allowed",
+        "offense_pct",
     ],
 }
 
@@ -81,6 +84,8 @@ BASE_COLS = [
     "receiving_tds",
     "target_share",
     "wopr",
+    "offense_pct",
+    "offense_pct_trend",
 ]
 
 WINDOWS = ["last1", "last3", "last5", "season_avg"]
@@ -109,6 +114,9 @@ class ProjectionModel:
             for col in selected_base_cols
             for window in WINDOWS
         ]
+        
+        if position in ["RB", "WR", "TE"]:
+            self.feature_cols.append("offense_pct_trend")
 
         relative_cols = [
             f"{col}_relative"

@@ -35,6 +35,8 @@ class PlayerFeatures:
             "receiving_tds",
             "target_share",
             "wopr",
+            "offense_snaps",
+            "offense_pct",
         ]
         
         for col in feature_cols:
@@ -58,10 +60,17 @@ class PlayerFeatures:
                 .transform(lambda x: x.shift(1).expanding().mean())
             )
             
+            
         df["next_week_points"] = (
             df.groupby(["player_id", "season"])["fantasy_points_ppr"]
             .shift(-1)
         )
+        
+        df["offense_pct_trend"] = (
+            df["offense_pct_last3"] -
+            df["offense_pct_last5"]
+        )
+
 
         model_df = df.dropna()
         
