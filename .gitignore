@@ -8,8 +8,12 @@ models/
 
 # C extensions
 *.so
+
+# my py files
 test.py
 test2.py
+pytorch_test.py
+xgb_test.py
 
 # Distribution / packaging
 .Python

@@ -181,7 +181,7 @@ class ProjectionModel:
         }).sort_values("importance", ascending=False)
         
     def save_model(self, file_name: str, metadata: dict | None = None):
-        model_dir = BASE_DIR / "models"
+        model_dir = BASE_DIR / "models" / "xgb_models"
         model_dir.mkdir(exist_ok=True)
 
         model_path = model_dir / file_name
@@ -192,7 +192,7 @@ class ProjectionModel:
             json.dump(metadata, f, indent=4)
 
     def load_model(self, file_name: str):
-        file_path = BASE_DIR / "models" / file_name
+        file_path = BASE_DIR / "models" / "xgb_models" / file_name
 
         if not file_path.exists():
             return False
