@@ -92,7 +92,7 @@ WINDOWS = ["last1", "last3", "last5", "season_avg"]
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-class ProjectionModel:
+class XGBProjectionModel:
     def __init__(self, position: str | None = None):
         self.position = position
         self.model = XGBRegressor(
