@@ -1,7 +1,47 @@
 import pandas as pd
 from pathlib import Path
+from app.config.model_config import DEFENSE_STAT_COLS
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+def build_pregame_defense_features(
+    defense_df: pd.DataFrame,
+) -> pd.DataFrame:
+    defense_df = defense_df.copy()
+
+    defense_df = defense_df.sort_values(
+        [
+            "opponent_team",
+            "season",
+            "position",
+            "week",
+        ]
+    ).reset_index(drop=True)
+
+    defense_df[DEFENSE_STAT_COLS] = (
+        defense_df
+        .groupby(
+            [
+                "opponent_team",
+                "season",
+                "position",
+            ]
+        )[DEFENSE_STAT_COLS]
+        .transform(
+            lambda group: (
+                group.shift(1)
+                .expanding()
+                .mean()
+            )
+        )
+    )
+
+    defense_df[DEFENSE_STAT_COLS] = (
+        defense_df[DEFENSE_STAT_COLS].fillna(0)
+    )
+
+    return defense_df
+
 
 class DefenseFeatures:
     def __init__(self, defense_df:pd.DataFrame):
@@ -80,5 +120,3 @@ class DefenseFeatures:
         model_df.to_parquet(cache_file, index=False)
         
         return model_df
-        
-        

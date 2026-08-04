@@ -5,6 +5,8 @@ import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
 
+from app.services.defense_features import build_pregame_defense_features
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 PLAYER_COLS = [
@@ -129,6 +131,7 @@ class PlayerSequenceDataset(Dataset):
             )
 
         player_df = player_df[PLAYER_COLS].copy()
+        defense_df = build_pregame_defense_features(defense_df)
 
         defense_df = (
             defense_df[DEFENSE_COLS]
