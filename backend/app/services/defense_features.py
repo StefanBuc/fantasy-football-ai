@@ -1,8 +1,38 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from app.config.model_config import DEFENSE_STAT_COLS
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+def build_upcoming_defense_features(
+    defense_df: pd.DataFrame,
+    defense_team: str,
+    season: int,
+    position: str,
+    upcoming_week: int,
+) -> dict[str, float]:
+    previous_games = defense_df[
+        (defense_df["opponent_team"] == defense_team)
+        & (defense_df["season"] == season)
+        & (defense_df["position"] == position)
+        & (defense_df["week"] < upcoming_week)
+    ]
+
+    if previous_games.empty:
+        return {col: 0.0 for col in DEFENSE_STAT_COLS}
+
+    averages = (
+        previous_games[DEFENSE_STAT_COLS]
+        .replace([np.inf, -np.inf], np.nan)
+        .mean()
+        .fillna(0.0)
+    )
+
+    return {
+        column: float(averages[column])
+        for column in DEFENSE_STAT_COLS
+    }
 
 def build_pregame_defense_features(
     defense_df: pd.DataFrame,

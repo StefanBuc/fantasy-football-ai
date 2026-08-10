@@ -1,13 +1,61 @@
 from pathlib import Path
-import json
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error
 import torch
 import torch.nn as nn
+import json
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error
+from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+def scaler_from_state(state):
+    scaler = StandardScaler()
+
+    scaler.mean_ = state["mean"].cpu().numpy()
+    scaler.scale_ = state["scale"].cpu().numpy()
+    scaler.var_ = state["var"].cpu().numpy()
+    scaler.n_features_in_ = int(state["n_features_in"])
+    scaler.n_samples_seen_ = int(state["n_samples_seen"])
+
+    return scaler
+
+def load_projection_checkpoint(checkpoint_path: str | Path, device: torch.device | None = None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    
+    if checkpoint.get("format_version") != 2:
+        raise ValueError("Unsupported checkpoint format.")
+
+    feature_cols = checkpoint["feature_cols"]
+    matchup_feature_cols = checkpoint["matchup_feature_cols"]
+
+    model = PyTorchProjectionModel(
+        input_size=len(feature_cols),
+        matchup_size=len(matchup_feature_cols),
+        **checkpoint["model_config"],
+    )
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    sequence_scaler = scaler_from_state(
+        checkpoint["sequence_scaler"]
+    )
+    matchup_scaler = scaler_from_state(
+        checkpoint["matchup_scaler"]
+    )
+
+    return (
+        model,
+        sequence_scaler,
+        matchup_scaler,
+        checkpoint,
+        device,
+    )
 class PyTorchProjectionModel(nn.Module):
     def __init__(self, input_size: int, matchup_size: int, hidden_size: int = 64, num_layers: int = 2, dropout: float = 0.2,):
         super().__init__()
@@ -55,6 +103,89 @@ class PyTorchProjectionModel(nn.Module):
         prediction = self.output_layer(combined)
 
         return prediction.squeeze(-1)
-        
-        
-        
+
+def predict_from_raw_features(
+    model,
+    sequence_scaler,
+    matchup_scaler,
+    checkpoint,
+    device,
+    history,
+    matchup,
+):
+    feature_cols = checkpoint["feature_cols"]
+    matchup_cols = checkpoint["matchup_feature_cols"]
+    sequence_length = checkpoint["sequence_length"]
+
+    if len(history) != sequence_length:
+        raise ValueError(
+            f"Expected {sequence_length} history games, "
+            f"received {len(history)}."
+        )
+
+    sequence_values = []
+
+    for game_number, game in enumerate(history, start=1):
+        missing = [
+            column
+            for column in feature_cols
+            if column not in game
+        ]
+
+        if missing:
+            raise ValueError(
+                f"History game {game_number} is missing: {missing}"
+            )
+
+        sequence_values.append(
+            [game[column] for column in feature_cols]
+        )
+
+    missing_matchup = [
+        column
+        for column in matchup_cols
+        if column not in matchup
+    ]
+
+    if missing_matchup:
+        raise ValueError(
+            f"Matchup is missing: {missing_matchup}"
+        )
+
+    sequence_array = np.asarray(
+        sequence_values,
+        dtype=np.float32,
+    )
+
+    matchup_array = np.asarray(
+        [[matchup[column] for column in matchup_cols]],
+        dtype=np.float32,
+    )
+
+    if not np.isfinite(sequence_array).all():
+        raise ValueError("History features must be finite.")
+
+    if not np.isfinite(matchup_array).all():
+        raise ValueError("Matchup features must be finite.")
+
+    scaled_sequence = sequence_scaler.transform(sequence_array)
+    scaled_matchup = matchup_scaler.transform(matchup_array)
+
+    sequence_tensor = torch.tensor(
+        scaled_sequence,
+        dtype=torch.float32,
+        device=device,
+    ).unsqueeze(0)
+
+    matchup_tensor = torch.tensor(
+        scaled_matchup,
+        dtype=torch.float32,
+        device=device,
+    )
+
+    model.eval()
+
+    with torch.no_grad():
+        prediction = model(sequence_tensor, matchup_tensor)
+
+    return float(prediction.item())

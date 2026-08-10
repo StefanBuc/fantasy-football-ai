@@ -83,6 +83,7 @@ class PlayerSequenceDataset(Dataset):
         sequences: list[np.ndarray] = []
         matchups: list[np.ndarray] = []
         targets_list: list[float] = []
+        sample_metadata = []
 
         player_df = player_df.copy()
         defense_df = defense_df.copy()
@@ -215,13 +216,13 @@ class PlayerSequenceDataset(Dataset):
 
             scaled_sequence_features = (
                 self.scaler.fit_transform(
-                    sequence_features_df
+                    sequence_features_df.to_numpy()
                 )
             )
         else:
             scaled_sequence_features = (
                 self.scaler.transform(
-                    sequence_features_df
+                    sequence_features_df.to_numpy()
                 )
             )
 
@@ -231,21 +232,23 @@ class PlayerSequenceDataset(Dataset):
 
             scaled_matchup_features = (
                 self.matchup_scaler.fit_transform(
-                    matchup_features_df
+                    matchup_features_df.to_numpy()
                 )
             )
         else:
             scaled_matchup_features = (
                 self.matchup_scaler.transform(
-                    matchup_features_df
+                    matchup_features_df.to_numpy()
                 )
             )
 
-        # Sequence features remain inside combined_df.
-        combined_df.loc[
-            :,
-            self.feature_cols,
-        ] = scaled_sequence_features
+        # Store sequence features separately so overlapping columns do
+        # not overwrite matchup-scaled values.
+        scaled_sequence_df = pd.DataFrame(
+            scaled_sequence_features,
+            columns=self.feature_cols,
+            index=combined_df.index,
+        )
 
         # Store matchup features separately so overlapping columns do
         # not overwrite sequence-scaled values.
@@ -268,8 +271,9 @@ class PlayerSequenceDataset(Dataset):
 
             player_indices = player_season_df.index
 
-            features = player_season_df[
-                self.feature_cols
+            features = scaled_sequence_df.loc[
+                player_indices,
+                self.feature_cols,
             ].to_numpy(dtype=np.float32)
 
             matchup_features = scaled_matchup_df.loc[
@@ -285,6 +289,16 @@ class PlayerSequenceDataset(Dataset):
                 self.sequence_length,
                 len(player_season_df),
             ):
+                target_row = player_season_df.iloc[target_index]
+
+                sample_metadata.append({
+                    "player_id": target_row["player_id"],
+                    "player_name": target_row["player_name"],
+                    "season": int(target_row["season"]),
+                    "week": int(target_row["week"]),
+                    "opponent_team": target_row["opponent_team"],
+                })
+                
                 start_index = (
                     target_index - self.sequence_length
                 )
@@ -324,14 +338,16 @@ class PlayerSequenceDataset(Dataset):
             np.asarray(targets_list),
             dtype=torch.float32,
         )
+        self.sample_metadata = sample_metadata
 
         if not (
             len(self.sequences)
             == len(self.matchups)
             == len(self.targets)
+            == len(self.sample_metadata)
         ):
             raise RuntimeError(
-                "Sequence, matchup, and target counts do not match."
+                "Sequence, matchup, target and metadata counts do not match."
             )
 
     def __len__(self) -> int:
