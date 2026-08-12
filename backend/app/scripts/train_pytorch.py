@@ -147,6 +147,19 @@ def main():
     print(f"Training seasons: {train_seasons}")
     print(f"Validation seasons: {validation_seasons}")
     print(f"Test seasons: {test_seasons}")
+    
+    validation_context_seasons = [
+        train_seasons[-1],
+        *validation_seasons,
+    ]
+
+    test_context_seasons = [
+        validation_seasons[-1],
+        *test_seasons,
+    ]
+    
+    print(f"Validation context seasons: {validation_context_seasons}")
+    print(f"Test context seasons: {test_context_seasons}")
 
     nfl_data = NFLData(season=args.season)
     
@@ -174,7 +187,8 @@ def main():
             feature_cols=feature_cols,
             sequence_length=5,
             seasons=train_seasons,
-            position=position
+            target_seasons=train_seasons,
+            position=position,
         )
         
         validation_dataset = PlayerSequenceDataset(
@@ -182,7 +196,8 @@ def main():
             defense_data,
             feature_cols=feature_cols,
             sequence_length=5,
-            seasons=validation_seasons,
+            seasons=validation_context_seasons,
+            target_seasons=validation_seasons,
             position=position,
             scaler=train_dataset.scaler,
             matchup_scaler=train_dataset.matchup_scaler,
@@ -193,7 +208,8 @@ def main():
             defense_data,
             feature_cols=feature_cols,
             sequence_length=5,
-            seasons=test_seasons,
+            seasons=test_context_seasons,
+            target_seasons=test_seasons,
             position=position,
             scaler=train_dataset.scaler,
             matchup_scaler=train_dataset.matchup_scaler,
@@ -300,6 +316,9 @@ def main():
             "train_seasons": train_seasons,
             "validation_seasons": validation_seasons,
             "test_seasons": test_seasons,
+            "validation_context_seasons": validation_context_seasons,
+            "test_context_seasons": test_context_seasons,
+            "history_strategy": "cross_season",
             "best_epoch": best_epoch,
             "validation_mae": best_validation_mae,
             "test_mae": test_mae,

@@ -60,6 +60,115 @@ DEFENSE_FEATURE_COLS = [
     "receptions_allowed",
 ]
 
+def merge_player_defense_features(
+    player_df: pd.DataFrame,
+    defense_df: pd.DataFrame,
+) -> pd.DataFrame:
+    player_features = player_df[PLAYER_COLS].copy()
+
+    defense_features = build_pregame_defense_features(
+        defense_df
+    )
+
+    defense_features = (
+        defense_features[DEFENSE_COLS]
+        .rename(
+            columns={
+                "opponent_team": "defense_team",
+            }
+        )
+        .copy()
+    )
+
+    return player_features.merge(
+        defense_features,
+        left_on=[
+            "opponent_team",
+            "season",
+            "week",
+            "position",
+        ],
+        right_on=[
+            "defense_team",
+            "season",
+            "week",
+            "position",
+        ],
+        how="left",
+        validate="many_to_one",
+    )
+    
+def build_player_history(
+    player_df: pd.DataFrame,
+    defense_df: pd.DataFrame,
+    player_id: str,
+    season: int,
+    upcoming_week: int,
+    position: str,
+    feature_cols: list[str],
+    sequence_length: int,
+) -> list[dict[str, float]]:
+    game_is_before_prediction = (
+        (player_df["season"] < season)
+        | (
+            (player_df["season"] == season)
+            & (player_df["week"] < upcoming_week)
+        )
+    )
+
+    previous_games = player_df[
+        (player_df["player_id"] == player_id)
+        & (player_df["season_type"] == "REG")
+        & (player_df["position"] == position)
+        & game_is_before_prediction
+    ].copy()
+
+    combined_df = merge_player_defense_features(
+        previous_games,
+        defense_df,
+    )
+
+    combined_df = (
+        combined_df
+        .sort_values(["season", "week"])
+        .tail(sequence_length)
+        .copy()
+    )
+
+    if len(combined_df) != sequence_length:
+        raise ValueError(
+            f"Player {player_id} has only {len(combined_df)} "
+            f"games before week {upcoming_week}; "
+            f"{sequence_length} are required."
+        )
+
+    missing_features = [
+        column
+        for column in feature_cols
+        if column not in combined_df.columns
+    ]
+
+    if missing_features:
+        raise ValueError(
+            f"Missing history features: {missing_features}"
+        )
+
+    combined_df[feature_cols] = (
+        combined_df[feature_cols]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    )
+    
+    feature_values = combined_df[feature_cols].to_numpy(dtype=np.float32)
+
+    return [
+        {
+            column: float(value)
+            for column, value in zip(feature_cols, row)
+        }
+        for row in feature_values
+    ]
 class PlayerSequenceDataset(Dataset):
     def __init__(
         self,
@@ -69,6 +178,7 @@ class PlayerSequenceDataset(Dataset):
         sequence_length: int = 5,
         position: str | None = None,
         seasons: list[int] | None = None,
+        target_seasons: list[int] | None = None,
         scaler: StandardScaler | None = None,
         matchup_scaler: StandardScaler | None = None,
     ):
@@ -79,6 +189,7 @@ class PlayerSequenceDataset(Dataset):
 
         self.scaler = scaler
         self.matchup_scaler = matchup_scaler
+        self.target_seasons = (set(target_seasons) if target_seasons is not None else None)
 
         sequences: list[np.ndarray] = []
         matchups: list[np.ndarray] = []
@@ -131,35 +242,9 @@ class PlayerSequenceDataset(Dataset):
                 f"Missing defense columns: {missing_defense_cols}"
             )
 
-        player_df = player_df[PLAYER_COLS].copy()
-        defense_df = build_pregame_defense_features(defense_df)
-
-        defense_df = (
-            defense_df[DEFENSE_COLS]
-            .rename(
-                columns={
-                    "opponent_team": "defense_team",
-                }
-            )
-            .copy()
-        )
-
-        combined_df = player_df.merge(
-            defense_df,
-            left_on=[
-                "opponent_team",
-                "season",
-                "week",
-                "position",
-            ],
-            right_on=[
-                "defense_team",
-                "season",
-                "week",
-                "position",
-            ],
-            how="left",
-            validate="many_to_one",
+        combined_df = merge_player_defense_features(
+            player_df=player_df,
+            defense_df=defense_df,
         )
 
         # Keep the target unscaled.
@@ -258,18 +343,15 @@ class PlayerSequenceDataset(Dataset):
             index=combined_df.index,
         )
 
-        for _, player_season_df in combined_df.groupby(
-            [
-                "player_id",
-                "season",
-            ],
+        for _, player_history_df in combined_df.groupby(
+            "player_id",
             sort=False,
         ):
-            player_season_df = player_season_df.sort_values(
-                "week"
+            player_history_df = player_history_df.sort_values(
+                ["season", "week"]
             )
 
-            player_indices = player_season_df.index
+            player_indices = player_history_df.index
 
             features = scaled_sequence_df.loc[
                 player_indices,
@@ -281,15 +363,21 @@ class PlayerSequenceDataset(Dataset):
                 self.matchup_feature_cols,
             ].to_numpy(dtype=np.float32)
 
-            targets = player_season_df[
+            targets = player_history_df[
                 "target_points"
             ].to_numpy(dtype=np.float32)
 
             for target_index in range(
                 self.sequence_length,
-                len(player_season_df),
+                len(player_history_df),
             ):
-                target_row = player_season_df.iloc[target_index]
+                target_row = player_history_df.iloc[target_index]
+                target_season = int(target_row["season"])
+                
+                if (self.target_seasons is not None
+                    and target_season not in self.target_seasons
+                ):
+                    continue
 
                 sample_metadata.append({
                     "player_id": target_row["player_id"],

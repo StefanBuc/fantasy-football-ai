@@ -89,3 +89,10 @@ POSITION_CONFIGS = {
     "WR": {"hidden_size": 64, "num_layers": 2, "dropout": 0.2},
     "TE": {"hidden_size": 32, "num_layers": 1, "dropout": 0.0},
 }
+
+SELECTED_PYTORCH_MODEL_VERSIONS = {
+    "QB": 4,
+    "RB": 4,
+    "WR": 4,
+    "TE": 4,
+}
