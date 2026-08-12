@@ -6,6 +6,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 from sklearn.preprocessing import StandardScaler
 import numpy as np
+from app.config.model_config import (
+    SELECTED_PYTORCH_MODEL_VERSIONS,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -56,6 +59,59 @@ def load_projection_checkpoint(checkpoint_path: str | Path, device: torch.device
         checkpoint,
         device,
     )
+    
+def load_selected_projection_checkpoint(
+    position: str,
+    device: torch.device | None = None,
+):
+    normalized_position = position.upper()
+
+    if (
+        normalized_position
+        not in SELECTED_PYTORCH_MODEL_VERSIONS
+    ):
+        raise ValueError(
+            f"Unsupported position: {position}"
+        )
+
+    version = SELECTED_PYTORCH_MODEL_VERSIONS[
+        normalized_position
+    ]
+
+    checkpoint_path = (
+        BASE_DIR
+        / "models"
+        / "pytorch"
+        / (
+            f"{normalized_position}"
+            f"_model_v{version}.pth"
+        )
+    )
+
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(
+            f"Selected checkpoint does not exist: "
+            f"{checkpoint_path}"
+        )
+
+    loaded = load_projection_checkpoint(
+        checkpoint_path,
+        device=device,
+    )
+
+    checkpoint = loaded[3]
+
+    if (
+        checkpoint["position"] != normalized_position
+        or checkpoint["version"] != version
+    ):
+        raise ValueError(
+            "Selected checkpoint metadata does not "
+            "match the model registry."
+        )
+
+    return loaded
+
 class PyTorchProjectionModel(nn.Module):
     def __init__(self, input_size: int, matchup_size: int, hidden_size: int = 64, num_layers: int = 2, dropout: float = 0.2,):
         super().__init__()

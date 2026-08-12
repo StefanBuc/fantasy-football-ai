@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument(
         "--version",
         type=int,
-        default=2,
+        default=4,
     )
 
     return parser.parse_args()
