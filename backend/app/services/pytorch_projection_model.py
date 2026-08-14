@@ -245,3 +245,150 @@ def predict_from_raw_features(
         prediction = model(sequence_tensor, matchup_tensor)
 
     return float(prediction.item())
+
+def predict_batch_from_raw_features(
+    model,
+    sequence_scaler,
+    matchup_scaler,
+    checkpoint,
+    device,
+    histories,
+    matchups,
+) -> list[float]:
+    if len(histories) != len(matchups):
+        raise ValueError(
+            "History and matchup counts do not match."
+        )
+
+    if not histories:
+        return []
+
+    feature_cols = checkpoint["feature_cols"]
+    matchup_cols = checkpoint["matchup_feature_cols"]
+    sequence_length = checkpoint["sequence_length"]
+
+    sequence_values = []
+
+    for sample_number, history in enumerate(
+        histories,
+        start=1,
+    ):
+        if len(history) != sequence_length:
+            raise ValueError(
+                f"Sample {sample_number} expected "
+                f"{sequence_length} history games, "
+                f"received {len(history)}."
+            )
+
+        sample_values = []
+
+        for game_number, game in enumerate(
+            history,
+            start=1,
+        ):
+            missing = [
+                column
+                for column in feature_cols
+                if column not in game
+            ]
+
+            if missing:
+                raise ValueError(
+                    f"Sample {sample_number}, history game "
+                    f"{game_number} is missing: {missing}"
+                )
+
+            sample_values.append(
+                [
+                    game[column]
+                    for column in feature_cols
+                ]
+            )
+
+        sequence_values.append(sample_values)
+
+    matchup_values = []
+
+    for sample_number, matchup in enumerate(
+        matchups,
+        start=1,
+    ):
+        missing = [
+            column
+            for column in matchup_cols
+            if column not in matchup
+        ]
+
+        if missing:
+            raise ValueError(
+                f"Sample {sample_number} matchup is "
+                f"missing: {missing}"
+            )
+
+        matchup_values.append(
+            [
+                matchup[column]
+                for column in matchup_cols
+            ]
+        )
+
+    sequence_array = np.asarray(
+        sequence_values,
+        dtype=np.float32,
+    )
+
+    matchup_array = np.asarray(
+        matchup_values,
+        dtype=np.float32,
+    )
+
+    if not np.isfinite(sequence_array).all():
+        raise ValueError(
+            "History features must be finite."
+        )
+
+    if not np.isfinite(matchup_array).all():
+        raise ValueError(
+            "Matchup features must be finite."
+        )
+
+    batch_size, sequence_length, feature_count = (
+        sequence_array.shape
+    )
+
+    scaled_sequences = sequence_scaler.transform(
+        sequence_array.reshape(-1, feature_count)
+    ).reshape(
+        batch_size,
+        sequence_length,
+        feature_count,
+    )
+
+    scaled_matchups = matchup_scaler.transform(
+        matchup_array
+    )
+
+    sequence_tensor = torch.as_tensor(
+        scaled_sequences,
+        dtype=torch.float32,
+        device=device,
+    )
+
+    matchup_tensor = torch.as_tensor(
+        scaled_matchups,
+        dtype=torch.float32,
+        device=device,
+    )
+
+    model.eval()
+
+    with torch.inference_mode():
+        predictions = model(
+            sequence_tensor,
+            matchup_tensor,
+        )
+
+    return [
+        float(value)
+        for value in predictions.cpu().tolist()
+    ]

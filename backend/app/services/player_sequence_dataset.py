@@ -97,6 +97,19 @@ def merge_player_defense_features(
         how="left",
         validate="many_to_one",
     )
+
+def prepare_player_history_features(
+    player_df: pd.DataFrame,
+    defense_df: pd.DataFrame,
+) -> pd.DataFrame:
+    regular_season_players = player_df[
+        player_df["season_type"] == "REG"
+    ].copy()
+
+    return merge_player_defense_features(
+        regular_season_players,
+        defense_df,
+    )
     
 def build_player_history(
     player_df: pd.DataFrame,
@@ -107,27 +120,31 @@ def build_player_history(
     position: str,
     feature_cols: list[str],
     sequence_length: int,
+    prepared_player_df: pd.DataFrame | None = None,
 ) -> list[dict[str, float]]:
+    
+    if prepared_player_df is None:
+        history_source = prepare_player_history_features(
+            player_df,
+            defense_df,
+        )
+    else:
+        history_source = prepared_player_df
+        
     game_is_before_prediction = (
-        (player_df["season"] < season)
+        (history_source["season"] < season)
         | (
-            (player_df["season"] == season)
-            & (player_df["week"] < upcoming_week)
+            (history_source["season"] == season)
+            & (history_source["week"] < upcoming_week)
         )
     )
 
-    previous_games = player_df[
-        (player_df["player_id"] == player_id)
-        & (player_df["season_type"] == "REG")
-        & (player_df["position"] == position)
+    combined_df = history_source[
+        (history_source["player_id"] == player_id)
+        & (history_source["position"] == position)
         & game_is_before_prediction
     ].copy()
-
-    combined_df = merge_player_defense_features(
-        previous_games,
-        defense_df,
-    )
-
+    
     combined_df = (
         combined_df
         .sort_values(["season", "week"])

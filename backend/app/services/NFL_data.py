@@ -6,6 +6,8 @@ class NFLData:
         self.weekly = None
         self.snap_counts = None
         self.ids = None
+        self.schedule = None
+        self.weekly_rosters = None
 
     def load_data(self):
         print("Loading NFL data...")
@@ -15,8 +17,25 @@ class NFLData:
         self.ids = nfl.import_ids()
         
         print("Data loaded!")
-        
-        
+    
+    def load_schedule(self):
+        print("Loading NFL schedule...")
+
+        self.schedule = nfl.import_schedules(
+            self.season
+        )
+
+        print("NFL schedule loaded!")
+    
+    def load_weekly_rosters(self):
+        print("Loading weekly NFL rosters...")
+
+        self.weekly_rosters = (
+            nfl.import_weekly_rosters(self.season)
+        )
+
+        print("Weekly NFL rosters loaded!")
+    
     def get_player_stats(self):
         if self.weekly is None:
             raise ValueError("Weekly data has not been loaded. Call load_data() first.")
@@ -85,7 +104,151 @@ class NFLData:
             how="left"
         )        
         return player_stats_df[[col for col in cols] + ["offense_snaps", "offense_pct"]]
-        
+    
+    def get_week_schedule(
+        self,
+        season: int,
+        week: int,
+    ):
+        if self.schedule is None:
+            raise ValueError(
+                "Schedule has not been loaded. "
+                "Call load_schedule() first."
+            )
+
+        required_columns = {
+            "season",
+            "week",
+            "home_team",
+            "away_team",
+        }
+
+        missing_columns = (
+            required_columns
+            - set(self.schedule.columns)
+        )
+
+        if missing_columns:
+            raise ValueError(
+                f"Schedule is missing columns: "
+                f"{sorted(missing_columns)}"
+            )
+
+        games = self.schedule[
+            (self.schedule["season"] == season)
+            & (self.schedule["week"] == week)
+        ].copy()
+
+        if "game_type" in games.columns:
+            games = games[
+                games["game_type"] == "REG"
+            ].copy()
+
+        return games
+    
+    def get_week_roster(
+        self,
+        season: int,
+        week: int,
+    ):
+        if self.weekly_rosters is None:
+            raise ValueError(
+                "Weekly rosters have not been loaded. "
+                "Call load_weekly_rosters() first."
+            )
+
+        required_columns = {
+            "player_id",
+            "player_name",
+            "position",
+            "team",
+            "season",
+            "week",
+            "status",
+        }
+
+        missing_columns = (
+            required_columns
+            - set(self.weekly_rosters.columns)
+        )
+
+        if missing_columns:
+            raise ValueError(
+                f"Roster is missing columns: "
+                f"{sorted(missing_columns)}"
+            )
+
+        roster = self.weekly_rosters[
+            (self.weekly_rosters["season"] == season)
+            & (self.weekly_rosters["week"] == week)
+            & (
+                self.weekly_rosters["position"].isin(
+                    ["QB", "RB", "WR", "TE"]
+                )
+            )
+            & (self.weekly_rosters["status"] == "ACT")
+            & self.weekly_rosters["player_id"].notna()
+        ].copy()
+
+        if "game_type" in roster.columns:
+            roster = roster[
+                roster["game_type"] == "REG"
+            ].copy()
+
+        duplicate_players = roster[
+            roster["player_id"].duplicated(
+                keep=False
+            )
+        ]
+
+        if not duplicate_players.empty:
+            raise ValueError(
+                "A player appears more than once in "
+                f"the {season} week {week} active roster."
+            )
+
+        return roster[
+            [
+                "player_id",
+                "player_name",
+                "position",
+                "team",
+                "season",
+                "week",
+                "status",
+            ]
+        ].reset_index(drop=True)
+    
+    def get_week_opponents(
+        self,
+        season: int,
+        week: int,
+    ) -> dict[str, str]:
+        games = self.get_week_schedule(
+            season=season,
+            week=week,
+        )
+
+        opponents: dict[str, str] = {}
+
+        for game in games.itertuples(index=False):
+            home_team = str(game.home_team).upper()
+            away_team = str(game.away_team).upper()
+
+            if (
+                home_team in opponents
+                or away_team in opponents
+            ):
+                raise ValueError(
+                    f"A team appears more than once in "
+                    f"{season} week {week}."
+                )
+
+            opponents[home_team] = away_team
+            opponents[away_team] = home_team
+
+        return opponents
+
     def get_defense_stats(self):
         if self.weekly is None:
             raise ValueError("Weekly data has not been loaded. Call load_data() first.")
