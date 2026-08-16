@@ -9,6 +9,9 @@ class PlayerProjectionRequest:
     opponent_team: str
     player_name: str | None = None
     team: str | None = None
+    depth_position: str | None = None
+    depth_team: int | None = None
+    active_depth_rank: int | None = None
     
 @dataclass(frozen=True)
 class PlayerProjection:

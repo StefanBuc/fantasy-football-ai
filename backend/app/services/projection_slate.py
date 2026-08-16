@@ -13,11 +13,19 @@ if TYPE_CHECKING:
     from app.services.pytorch_inference import (
         PyTorchProjectionService,
     )
+    
+ACTIVE_DEPTH_LIMITS = {
+    "QB": 1,
+    "RB": 2,
+    "WR": 2,
+    "TE": 2,
+}
 
 def build_projection_requests(
     roster_df: pd.DataFrame,
     opponents: dict[str, str],
     position: str,
+    depth_chart_df: pd.DataFrame | None = None,
 ) -> list[PlayerProjectionRequest]:
     normalized_position = position.upper()
 
@@ -55,6 +63,68 @@ def build_projection_requests(
         roster_df["position"]
         == normalized_position
     ]
+    
+    position_roster = position_roster.copy()
+
+    if depth_chart_df is not None:
+        required_depth_columns = {
+            "player_id",
+            "team",
+            "position",
+            "depth_position",
+            "depth_team",
+        }
+
+        missing_depth_columns = (
+            required_depth_columns
+            - set(depth_chart_df.columns)
+        )
+
+        if missing_depth_columns:
+            raise ValueError(
+                f"Depth chart is missing columns: "
+                f"{sorted(missing_depth_columns)}"
+            )
+
+        position_depth_chart = depth_chart_df[
+            depth_chart_df["position"]
+            == normalized_position
+        ][
+            [
+                "player_id",
+                "team",
+                "position",
+                "depth_position",
+                "depth_team",
+            ]
+        ].copy()
+
+        position_roster = position_roster.merge(
+            position_depth_chart,
+            on=["player_id", "team", "position"],
+            how="inner",
+            validate="one_to_one",
+        )
+
+        position_roster["active_depth_rank"] = (
+            position_roster
+            .groupby(
+                ["team", "depth_position"]
+            )["depth_team"]
+            .rank(
+                method="dense",
+                ascending=True,
+            )
+        )
+
+        depth_limit = ACTIVE_DEPTH_LIMITS[
+            normalized_position
+        ]
+
+        position_roster = position_roster[
+            position_roster["active_depth_rank"]
+            <= depth_limit
+        ].copy()
 
     requests = []
 
@@ -70,7 +140,23 @@ def build_projection_requests(
 
         season_value = str(player.season).strip()
         week_value = str(player.week).strip()
-
+        
+        depth_position=(
+            str(player.depth_position)
+            if hasattr(player, "depth_position")
+            else None
+        )
+        depth_team=(
+            int(float(str(player.depth_team)))
+            if hasattr(player, "depth_team")
+            else None
+        )
+        active_depth_rank=(
+            int(float(str(player.active_depth_rank)))
+            if hasattr(player, "active_depth_rank")
+            else None
+        )
+        
         requests.append(
             PlayerProjectionRequest(
                 player_id=str(player.player_id),
@@ -79,6 +165,9 @@ def build_projection_requests(
                 season=int(season_value),
                 upcoming_week=int(week_value),
                 opponent_team=opponent,
+                depth_position=depth_position,
+                depth_team=depth_team, 
+                active_depth_rank=active_depth_rank,
             )
         )
 

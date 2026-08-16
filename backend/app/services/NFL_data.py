@@ -1,4 +1,5 @@
 import nfl_data_py as nfl
+import pandas as pd
 
 class NFLData:
     def __init__(self, season: list = [2020, 2021, 2022, 2023, 2024]):
@@ -8,6 +9,7 @@ class NFLData:
         self.ids = None
         self.schedule = None
         self.weekly_rosters = None
+        self.depth_charts = None
 
     def load_data(self):
         print("Loading NFL data...")
@@ -35,6 +37,15 @@ class NFLData:
         )
 
         print("Weekly NFL rosters loaded!")
+    
+    def load_depth_charts(self):
+        print("Loading NFL depth charts...")
+
+        self.depth_charts = nfl.import_depth_charts(
+            self.season
+        )
+
+        print("NFL depth charts loaded!")
     
     def get_player_stats(self):
         if self.weekly is None:
@@ -300,3 +311,93 @@ class NFLData:
         )
         
         return defense
+
+    def get_week_depth_chart(
+        self,
+        season: int,
+        week: int,
+    ):
+        if self.depth_charts is None:
+            raise ValueError(
+                "Depth charts have not been loaded. "
+                "Call load_depth_charts() first."
+            )
+
+        required_columns = {
+            "season",
+            "week",
+            "game_type",
+            "club_code",
+            "formation",
+            "gsis_id",
+            "position",
+            "depth_position",
+            "depth_team",
+        }
+
+        missing_columns = (
+            required_columns
+            - set(self.depth_charts.columns)
+        )
+
+        if missing_columns:
+            raise ValueError(
+                f"Depth chart is missing columns: "
+                f"{sorted(missing_columns)}"
+            )
+
+        depth_chart = self.depth_charts[
+            (self.depth_charts["season"] == season)
+            & (self.depth_charts["week"] == week)
+            & (
+                self.depth_charts["game_type"]
+                == "REG"
+            )
+            & (
+                self.depth_charts["formation"]
+                == "Offense"
+            )
+            & (
+                self.depth_charts["position"].isin(
+                    ["QB", "RB", "WR", "TE"]
+                )
+            )
+            & self.depth_charts["gsis_id"].notna()
+        ].copy()
+
+        depth_chart["depth_team"] = pd.to_numeric(
+            depth_chart["depth_team"],
+            errors="coerce",
+        )
+
+        depth_chart = depth_chart.dropna(
+            subset=["depth_team"]
+        )
+
+        depth_chart = depth_chart.rename(
+            columns={
+                "gsis_id": "player_id",
+                "club_code": "team",
+            }
+        )
+
+        # If a player appears at multiple offensive spots,
+        # retain their highest depth-chart placement.
+        depth_chart = (
+            depth_chart
+            .sort_values("depth_team")
+            .drop_duplicates(
+                subset=["player_id"],
+                keep="first",
+            )
+        )
+
+        return depth_chart[
+            [
+                "player_id",
+                "team",
+                "position",
+                "depth_position",
+                "depth_team",
+            ]
+        ].reset_index(drop=True)
