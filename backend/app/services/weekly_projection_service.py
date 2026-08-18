@@ -17,6 +17,10 @@ SUPPORTED_POSITIONS = {
     "TE",
 }
 
+'''
+    A service for projecting player performance for a specific week and position.
+'''
+
 
 class WeeklyProjectionService:
     def __init__(self, season: int):
