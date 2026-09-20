@@ -47,6 +47,13 @@ class NFLData:
 
         print("NFL depth charts loaded!")
     
+    def load_player_ids(self):
+        print("Loading NFL player IDs...")
+
+        self.ids = nfl.import_ids()
+
+        print("NFL player IDs loaded!")
+    
     def get_player_stats(self):
         if self.weekly is None:
             raise ValueError("Weekly data has not been loaded. Call load_data() first.")
@@ -401,3 +408,64 @@ class NFLData:
                 "depth_team",
             ]
         ].reset_index(drop=True)
+    
+    def get_player_id_map(self) -> pd.DataFrame:
+        if self.ids is None:
+            raise ValueError(
+                "IDs data has not been loaded. "
+                "Call load_data() or load_player_ids() first."
+            )
+
+        required_columns = {
+            "espn_id",
+            "gsis_id",
+            "name",
+            "position",
+            "team",
+        }
+
+        missing_columns = (
+            required_columns - set(self.ids.columns)
+        )
+
+        if missing_columns:
+            raise ValueError(
+                f"ID data is missing columns: "
+                f"{sorted(missing_columns)}"
+            )
+
+        player_ids = self.ids[
+            [
+                "espn_id",
+                "gsis_id",
+                "name",
+                "position",
+                "team",
+            ]
+        ].copy()
+
+        player_ids["espn_id"] = pd.to_numeric(
+            player_ids["espn_id"],
+            errors="coerce",
+        )
+
+        player_ids = player_ids[
+            player_ids["position"].isin(
+                ["QB", "RB", "WR", "TE"]
+            )
+            & player_ids["espn_id"].notna()
+            & player_ids["gsis_id"].notna()
+        ].copy()
+
+        player_ids["espn_id"] = (
+            player_ids["espn_id"].astype("int64")
+        )
+
+        player_ids = player_ids.rename(
+            columns={
+                "gsis_id": "player_id",
+                "name": "player_name",
+            }
+        )
+
+        return player_ids.reset_index(drop=True)

@@ -10,6 +10,11 @@ from app.services.projection_types import (
     ProjectionSlateResult,
 )
 
+from app.services.projection_types import (
+    PlayerProjectionRequest,
+    ProjectionSlateResult,
+)
+
 SUPPORTED_POSITIONS = {
     "QB",
     "RB",
@@ -83,6 +88,22 @@ class WeeklyProjectionService:
             normalized_position
         ]
 
+    def project_requests(
+        self,
+        position: str,
+        requests: list[PlayerProjectionRequest],
+    ) -> ProjectionSlateResult:
+        normalized_position = position.upper()
+
+        service = self._get_position_service(
+            normalized_position
+        )
+
+        return project_position_slate(
+            service=service,
+            requests=requests,
+        )
+
     def project_week(
         self,
         week: int,
@@ -94,10 +115,6 @@ class WeeklyProjectionService:
             )
 
         normalized_position = position.upper()
-
-        service = self._get_position_service(
-            normalized_position
-        )
 
         roster_df = self.data.get_week_roster(
             season=self.season,
@@ -123,7 +140,7 @@ class WeeklyProjectionService:
             depth_chart_df=depth_chart_df,
         )
 
-        return project_position_slate(
-            service=service,
+        return self.project_requests(
+            position=normalized_position,
             requests=requests,
         )
