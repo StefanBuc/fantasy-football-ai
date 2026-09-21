@@ -1,14 +1,21 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 
 from app.integrations.espn_player_matching import (
     ESPNPlayerMatch,
+    match_espn_player,
 )
 from app.services.projection_types import (
     PlayerProjectionRequest,
+    ProjectionSlateResult,
 )
+
+if TYPE_CHECKING:
+    from app.services.weekly_projection_service import (
+        WeeklyProjectionService,
+    )
 
 
 RosterProjectionStatus = Literal[
@@ -20,7 +27,7 @@ RosterProjectionStatus = Literal[
 @dataclass(frozen=True)
 class ESPNRosterProjection:
     espn_id: int
-    player_id: str
+    player_id: str | None
     player_name: str
     position: str
     lineup_slot: str
@@ -29,7 +36,16 @@ class ESPNRosterProjection:
     predicted_points: float | None
     status: RosterProjectionStatus
     reason: str | None = None
-    
+
+
+@dataclass(frozen=True)
+class ESPNRosterPlayer:
+    espn_id: int
+    player_name: str
+    position: str
+    lineup_slot: str
+
+
 def build_espn_projection_request(
     player_match: ESPNPlayerMatch,
     roster_df: pd.DataFrame,
@@ -106,6 +122,7 @@ def build_espn_projection_request(
 
     return request, None
 
+
 def build_espn_request_batches(
     player_matches: list[ESPNPlayerMatch],
     roster_df: pd.DataFrame,
@@ -156,3 +173,144 @@ def build_espn_request_batches(
         )
 
     return requests_by_position, skipped
+
+
+def project_espn_request_batches(
+    weekly_service: "WeeklyProjectionService",
+    requests_by_position: dict[
+        str,
+        list[PlayerProjectionRequest],
+    ],
+) -> dict[str, ProjectionSlateResult]:
+    results: dict[str, ProjectionSlateResult] = {}
+
+    for position, requests in (
+        requests_by_position.items()
+    ):
+        if not requests:
+            continue
+
+        results[position] = (
+            weekly_service.project_requests(
+                position=position,
+                requests=requests,
+            )
+        )
+
+    return results
+
+
+def project_espn_roster(
+    weekly_service: "WeeklyProjectionService",
+    roster_players: list[ESPNRosterPlayer],
+    id_map: pd.DataFrame,
+    roster_df: pd.DataFrame,
+    opponents: dict[str, str],
+    season: int,
+    week: int,
+) -> list[ESPNRosterProjection]:
+    player_matches = [
+        match_espn_player(
+            id_map=id_map,
+            espn_id=player.espn_id,
+            espn_name=player.player_name,
+            position=player.position,
+        )
+        for player in roster_players
+    ]
+
+    requests_by_position, request_skips = (
+        build_espn_request_batches(
+            player_matches=player_matches,
+            roster_df=roster_df,
+            opponents=opponents,
+            season=season,
+            week=week,
+        )
+    )
+
+    batch_results = project_espn_request_batches(
+        weekly_service=weekly_service,
+        requests_by_position=requests_by_position,
+    )
+
+    requests_by_player_id = {
+        request.player_id: request
+        for requests in requests_by_position.values()
+        for request in requests
+    }
+
+    predictions_by_player_id = {
+        projection.request.player_id: projection.predicted_points
+        for result in batch_results.values()
+        for projection in result.projections
+    }
+
+    model_skips_by_player_id = {
+        skipped.request.player_id: skipped.reason
+        for result in batch_results.values()
+        for skipped in result.skipped
+    }
+
+    projections = []
+
+    for roster_player, player_match in zip(
+        roster_players,
+        player_matches,
+    ):
+        player_id = player_match.player_id
+        request = (
+            requests_by_player_id.get(player_id)
+            if player_id is not None
+            else None
+        )
+
+        predicted_points = (
+            predictions_by_player_id.get(player_id)
+            if player_id is not None
+            else None
+        )
+
+        reason = player_match.reason
+
+        if reason is None:
+            reason = request_skips.get(
+                roster_player.espn_id
+            )
+
+        if reason is None and player_id is not None:
+            reason = model_skips_by_player_id.get(
+                player_id
+            )
+
+        if predicted_points is None and reason is None:
+            reason = "No projection result was produced."
+
+        projections.append(
+            ESPNRosterProjection(
+                espn_id=roster_player.espn_id,
+                player_id=player_id,
+                player_name=roster_player.player_name,
+                position=roster_player.position,
+                lineup_slot=roster_player.lineup_slot,
+                team=(
+                    request.team
+                    if request is not None
+                    else None
+                ),
+                opponent_team=(
+                    request.opponent_team
+                    if request is not None
+                    else None
+                ),
+                predicted_points=predicted_points,
+                status=(
+                    "projected"
+                    if predicted_points is not None
+                    else "skipped"
+                ),
+                reason=reason,
+            )
+        )
+
+    return projections

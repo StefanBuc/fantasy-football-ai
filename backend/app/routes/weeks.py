@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/weeks", tags=["weeks"])
 @lru_cache(maxsize=3)
 def get_schedule_data(season: Annotated[int, Path(ge=2020, le=date.today().year)]) -> NFLData:
     nfl_data = NFLData([season])
-    nfl_data.load_data()
+    nfl_data.load_schedule()
     return nfl_data
 
 @router.get("/{season}")

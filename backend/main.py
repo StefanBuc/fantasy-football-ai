@@ -7,12 +7,15 @@ from app.routes.metadata import router as metadata_router
 from app.routes.players import router as players_router
 from app.routes.espn import router as espn_router
 
-app = FastAPI()
+app = FastAPI(
+    title="Fantasy Football AI API",
+    version="1.0.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for simplicity
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -7,10 +7,6 @@ from app.services.projection_slate import (
     project_position_slate,
 )
 from app.services.projection_types import (
-    ProjectionSlateResult,
-)
-
-from app.services.projection_types import (
     PlayerProjectionRequest,
     ProjectionSlateResult,
 )

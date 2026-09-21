@@ -5,11 +5,11 @@ from app.integrations.espn_player_matching import (
 )
 from app.integrations.espn_roster_projection import (
     build_espn_projection_request,
-)
-
-from app.integrations.espn_roster_projection import (
-    build_espn_projection_request,
     build_espn_request_batches,
+    project_espn_request_batches,
+)
+from app.services.projection_types import (
+    ProjectionSlateResult,
 )
 
 def make_player_match() -> ESPNPlayerMatch:
@@ -169,3 +169,63 @@ def test_groups_requests_by_position_and_skips_inactive_player():
 
     assert 103 in skipped
     assert "not on the active NFL roster" in skipped[103]
+
+
+class FakeWeeklyProjectionService:
+    def __init__(self):
+        self.calls = []
+
+    def project_requests(
+        self,
+        position,
+        requests,
+    ):
+        self.calls.append((position, requests))
+
+        return ProjectionSlateResult(
+            projections=[],
+            skipped=[],
+        )
+
+
+def test_projects_each_nonempty_position_batch_once():
+    service = FakeWeeklyProjectionService()
+    qb_request = build_espn_projection_request(
+        player_match=ESPNPlayerMatch(
+            espn_id=201,
+            espn_name="Quarterback",
+            position="QB",
+            player_id="qb-1",
+            status="matched",
+        ),
+        roster_df=pd.DataFrame(
+            [
+                {
+                    "player_id": "qb-1",
+                    "player_name": "Q.Back",
+                    "position": "QB",
+                    "team": "BUF",
+                }
+            ]
+        ),
+        opponents={"BUF": "NYJ"},
+        season=2024,
+        week=1,
+    )[0]
+
+    assert qb_request is not None
+
+    results = project_espn_request_batches(
+        weekly_service=service,
+        requests_by_position={
+            "QB": [qb_request],
+            "RB": [],
+            "WR": [],
+            "TE": [],
+        },
+    )
+
+    assert list(results) == ["QB"]
+    assert len(service.calls) == 1
+    assert service.calls[0][0] == "QB"
+    assert service.calls[0][1] == [qb_request]
