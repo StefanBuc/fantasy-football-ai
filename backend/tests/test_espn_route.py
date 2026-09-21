@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from app.routes import espn as espn_route
+from app.config.espn_config import ESPNLocalConfig
 from espn_api.requests.espn_requests import (
     ESPNAccessDenied,
 )
@@ -206,3 +207,120 @@ def test_public_team_projection_endpoint(monkeypatch):
         "status": "projected",
         "reason": None,
     }
+
+
+def make_private_league():
+    return SimpleNamespace(
+        settings=SimpleNamespace(
+            name="Private Test League",
+        ),
+        teams=[
+            SimpleNamespace(
+                team_id=1,
+                team_name="Private Team",
+                team_abbrev="PRV",
+                logo_url="",
+                roster=[
+                    SimpleNamespace(
+                        playerId=501,
+                        name="Test Player",
+                        position="RB",
+                        lineupSlot="RB",
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def configure_private_route(monkeypatch):
+    monkeypatch.setattr(
+        espn_route,
+        "local_espn_api_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        espn_route,
+        "get_local_espn_config",
+        lambda: ESPNLocalConfig(
+            league_id=987654321,
+            season=2024,
+            swid="private-swid",
+            espn_s2="private-espn-s2",
+        ),
+    )
+
+    def fake_get_league(
+        league_id,
+        year,
+        espn_s2,
+        swid,
+    ):
+        assert league_id == 987654321
+        assert year == 2024
+        assert espn_s2 == "private-espn-s2"
+        assert swid == "private-swid"
+        return make_private_league()
+
+    monkeypatch.setattr(
+        espn_route,
+        "get_league",
+        fake_get_league,
+    )
+
+
+def test_local_private_league_connection(monkeypatch):
+    configure_private_route(monkeypatch)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/espn/local/connect"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["league_name"] == (
+        "Private Test League"
+    )
+    assert "private-swid" not in response.text
+    assert "private-espn-s2" not in response.text
+
+
+def test_local_private_league_projections(monkeypatch):
+    configure_private_route(monkeypatch)
+    monkeypatch.setattr(
+        espn_route,
+        "get_espn_projection_service",
+        lambda season: FakeESPNProjectionService(),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/espn/local/projections",
+        json={
+            "team_id": 1,
+            "week": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["league_id"] == 987654321
+    assert body["projected_count"] == 1
+    assert body["players"][0]["predicted_points"] == 17.25
+
+
+def test_local_private_route_is_hidden_when_disabled(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        espn_route,
+        "local_espn_api_enabled",
+        lambda: False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/espn/local/connect"
+    )
+
+    assert response.status_code == 404

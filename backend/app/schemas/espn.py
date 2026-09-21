@@ -37,6 +37,11 @@ class ESPNTeamProjectionRequest(BaseModel):
     week: int = Field(ge=1, le=18)
 
 
+class ESPNLocalTeamProjectionRequest(BaseModel):
+    team_id: int = Field(gt=0)
+    week: int = Field(ge=1, le=18)
+
+
 class ESPNRosterProjectionResponse(BaseModel):
     espn_id: int
     player_id: str | None

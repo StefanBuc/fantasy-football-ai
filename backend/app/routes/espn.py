@@ -1,12 +1,18 @@
 from functools import lru_cache
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from espn_api.requests.espn_requests import (
     ESPNAccessDenied,
     ESPNInvalidLeague,
     ESPNUnknownError,
 )
 
+from app.config.espn_config import (
+    ESPNLocalConfig,
+    get_local_espn_config,
+    local_espn_api_enabled,
+)
 from app.integrations.espn_fantasy import get_league
 from app.integrations.espn_roster_projection import (
     ESPNRosterPlayer,
@@ -15,6 +21,7 @@ from app.integrations.espn_roster_projection import (
 from app.schemas.espn import (
     ESPNLeagueConnectRequest,
     ESPNLeagueConnectResponse,
+    ESPNLocalTeamProjectionRequest,
     ESPNRosterProjectionResponse,
     ESPNTeamSummary,
     ESPNTeamProjectionRequest,
@@ -32,6 +39,12 @@ SUPPORTED_POSITIONS = {
     "RB",
     "WR",
     "TE",
+}
+
+LOCAL_CLIENT_HOSTS = {
+    "127.0.0.1",
+    "::1",
+    "testclient",
 }
 
 
@@ -93,15 +106,72 @@ def find_league_team(league, team_id: int):
     return team
 
 
-@router.post("/connect", response_model=ESPNLeagueConnectResponse)
-def connect_public_league(
-    payload: ESPNLeagueConnectRequest,
-) -> ESPNLeagueConnectResponse:
-    league = get_public_league(
-        league_id=payload.league_id,
-        season=payload.season,
+def require_local_espn_access(
+    request: Request,
+) -> ESPNLocalConfig:
+    client_host = (
+        request.client.host
+        if request.client is not None
+        else None
     )
 
+    if (
+        not local_espn_api_enabled()
+        or client_host not in LOCAL_CLIENT_HOSTS
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Local ESPN access is disabled.",
+        )
+
+    try:
+        return get_local_espn_config()
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=503,
+            detail=str(error),
+        ) from error
+
+
+def get_configured_private_league(
+    request: Request,
+) -> tuple[ESPNLocalConfig, Any]:
+    config = require_local_espn_access(request)
+
+    try:
+        league = get_league(
+            league_id=config.league_id,
+            year=config.season,
+            espn_s2=config.espn_s2,
+            swid=config.swid,
+        )
+    except ESPNAccessDenied as error:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The configured ESPN credentials were "
+                "not accepted."
+            ),
+        ) from error
+    except ESPNInvalidLeague as error:
+        raise HTTPException(
+            status_code=404,
+            detail="The configured ESPN league was not found.",
+        ) from error
+    except ESPNUnknownError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="ESPN returned an unexpected response.",
+        ) from error
+
+    return config, league
+
+
+def build_league_connect_response(
+    league,
+    league_id: int,
+    season: int,
+) -> ESPNLeagueConnectResponse:
     teams = [
         ESPNTeamSummary(
             team_id=int(team.team_id),
@@ -117,28 +187,24 @@ def connect_public_league(
     ]
 
     return ESPNLeagueConnectResponse(
-        league_id=payload.league_id,
-        season=payload.season,
+        league_id=league_id,
+        season=season,
         league_name=str(league.settings.name),
         team_count=len(teams),
         teams=teams,
     )
 
 
-@router.post(
-    "/projections",
-    response_model=ESPNTeamProjectionResponse,
-)
-def get_public_team_projections(
-    payload: ESPNTeamProjectionRequest,
+def build_team_projection_response(
+    league,
+    league_id: int,
+    season: int,
+    team_id: int,
+    week: int,
 ) -> ESPNTeamProjectionResponse:
-    league = get_public_league(
-        league_id=payload.league_id,
-        season=payload.season,
-    )
     team = find_league_team(
         league=league,
-        team_id=payload.team_id,
+        team_id=team_id,
     )
 
     roster_players = [
@@ -155,15 +221,15 @@ def get_public_team_projections(
 
     try:
         service = get_espn_projection_service(
-            season=payload.season
+            season=season
         )
         roster_df = service.data.get_week_roster(
-            season=payload.season,
-            week=payload.week,
+            season=season,
+            week=week,
         )
         opponents = service.data.get_week_opponents(
-            season=payload.season,
-            week=payload.week,
+            season=season,
+            week=week,
         )
         id_map = service.data.get_player_id_map()
 
@@ -173,10 +239,9 @@ def get_public_team_projections(
             id_map=id_map,
             roster_df=roster_df,
             opponents=opponents,
-            season=payload.season,
-            week=payload.week,
+            season=season,
+            week=week,
         )
-
     except ValueError as error:
         raise HTTPException(
             status_code=400,
@@ -205,13 +270,90 @@ def get_public_team_projections(
     )
 
     return ESPNTeamProjectionResponse(
-        league_id=payload.league_id,
+        league_id=league_id,
         league_name=str(league.settings.name),
-        season=payload.season,
-        week=payload.week,
-        team_id=payload.team_id,
+        season=season,
+        week=week,
+        team_id=team_id,
         team_name=str(team.team_name),
         projected_count=projected_count,
         skipped_count=len(players) - projected_count,
         players=players,
+    )
+
+
+@router.post("/connect", response_model=ESPNLeagueConnectResponse)
+def connect_public_league(
+    payload: ESPNLeagueConnectRequest,
+) -> ESPNLeagueConnectResponse:
+    league = get_public_league(
+        league_id=payload.league_id,
+        season=payload.season,
+    )
+
+    return build_league_connect_response(
+        league=league,
+        league_id=payload.league_id,
+        season=payload.season,
+    )
+
+
+@router.post(
+    "/projections",
+    response_model=ESPNTeamProjectionResponse,
+)
+def get_public_team_projections(
+    payload: ESPNTeamProjectionRequest,
+) -> ESPNTeamProjectionResponse:
+    league = get_public_league(
+        league_id=payload.league_id,
+        season=payload.season,
+    )
+    return build_team_projection_response(
+        league=league,
+        league_id=payload.league_id,
+        season=payload.season,
+        team_id=payload.team_id,
+        week=payload.week,
+    )
+
+
+@router.post(
+    "/local/connect",
+    response_model=ESPNLeagueConnectResponse,
+    include_in_schema=False,
+)
+def connect_configured_private_league(
+    request: Request,
+) -> ESPNLeagueConnectResponse:
+    config, league = get_configured_private_league(
+        request
+    )
+
+    return build_league_connect_response(
+        league=league,
+        league_id=config.league_id,
+        season=config.season,
+    )
+
+
+@router.post(
+    "/local/projections",
+    response_model=ESPNTeamProjectionResponse,
+    include_in_schema=False,
+)
+def get_configured_private_team_projections(
+    payload: ESPNLocalTeamProjectionRequest,
+    request: Request,
+) -> ESPNTeamProjectionResponse:
+    config, league = get_configured_private_league(
+        request
+    )
+
+    return build_team_projection_response(
+        league=league,
+        league_id=config.league_id,
+        season=config.season,
+        team_id=payload.team_id,
+        week=payload.week,
     )

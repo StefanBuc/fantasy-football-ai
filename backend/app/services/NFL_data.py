@@ -1,5 +1,14 @@
 import nfl_data_py as nfl
+import numpy as np
 import pandas as pd
+from urllib.error import HTTPError
+
+
+WEEKLY_PLAYER_STATS_URL = (
+    "https://github.com/nflverse/nflverse-data/"
+    "releases/download/stats_player/"
+    "stats_player_week_{season}.parquet"
+)
 
 class NFLData:
     def __init__(self, season: list = [2020, 2021, 2022, 2023, 2024]):
@@ -11,10 +20,51 @@ class NFLData:
         self.weekly_rosters = None
         self.depth_charts = None
 
+    def _load_weekly_player_data(self) -> pd.DataFrame:
+        season_frames = []
+
+        for season in self.season:
+            try:
+                season_data = nfl.import_weekly_data(
+                    [season]
+                )
+            except HTTPError as error:
+                if error.code != 404:
+                    raise
+
+                season_data = pd.read_parquet(
+                    WEEKLY_PLAYER_STATS_URL.format(
+                        season=season
+                    )
+                )
+
+                float_columns = season_data.select_dtypes(
+                    include=[np.float64]
+                ).columns
+                season_data[float_columns] = (
+                    season_data[float_columns]
+                    .astype(np.float32)
+                )
+
+            if (
+                "recent_team" not in season_data.columns
+                and "team" in season_data.columns
+            ):
+                season_data = season_data.rename(
+                    columns={"team": "recent_team"}
+                )
+
+            season_frames.append(season_data)
+
+        return pd.concat(
+            season_frames,
+            ignore_index=True,
+        )
+
     def load_data(self):
         print("Loading NFL data...")
         
-        self.weekly = nfl.import_weekly_data(self.season)
+        self.weekly = self._load_weekly_player_data()
         self.snap_counts = nfl.import_snap_counts(self.season)
         self.ids = nfl.import_ids()
         

@@ -30,6 +30,17 @@ def required_environment_value(name: str) -> str:
     return value
 
 
+def local_espn_api_enabled() -> bool:
+    return os.getenv(
+        "ESPN_ENABLE_LOCAL_API",
+        "false",
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def get_local_espn_config() -> ESPNLocalConfig:
     league_id_value = required_environment_value(
         "ESPN_LEAGUE_ID"
