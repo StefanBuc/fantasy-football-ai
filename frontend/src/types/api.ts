@@ -3,6 +3,14 @@ export type ESPNTeamSummary = {
   team_name: string
   abbreviation: string
   logo_url: string | null
+  standing: number
+  wins: number
+  losses: number
+  ties: number
+  points_for: number
+  points_against: number
+  streak: string | null
+  playoff_pct: number | null
 }
 
 export type ESPNLeague = {
@@ -38,6 +46,17 @@ export type TeamProjectionResponse = {
   projected_count: number
   skipped_count: number
   players: RosterProjection[]
+}
+
+export type MatchupResponse = {
+  league_id: number
+  league_name: string
+  season: number
+  week: number
+  home_score: number
+  away_score: number
+  home: TeamProjectionResponse
+  away: TeamProjectionResponse
 }
 
 export type ConnectLeagueInput = {

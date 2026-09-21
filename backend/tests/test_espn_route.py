@@ -14,6 +14,7 @@ from app.services.projection_types import (
     PlayerProjection,
     ProjectionSlateResult,
 )
+from app.schemas.espn import ESPNTeamProjectionResponse
 
 def test_connect_public_league(monkeypatch):
     fake_league = SimpleNamespace(
@@ -376,3 +377,60 @@ def test_projection_keeps_unsupported_roster_players(
     assert punter["reason"] == (
         "AI projections are not supported for P yet."
     )
+
+
+def test_build_matchup_response_finds_team_opponent(
+    monkeypatch,
+):
+    home = SimpleNamespace(team_id=1)
+    away = SimpleNamespace(team_id=2)
+    league = SimpleNamespace(
+        settings=SimpleNamespace(name="Test League"),
+        scoreboard=lambda week: [
+            SimpleNamespace(
+                home_team=home,
+                away_team=away,
+                home_score=101.5,
+                away_score=98.25,
+            )
+        ],
+    )
+
+    def fake_projection_response(
+        league,
+        league_id,
+        season,
+        team_id,
+        week,
+    ):
+        return ESPNTeamProjectionResponse(
+            league_id=league_id,
+            league_name="Test League",
+            season=season,
+            week=week,
+            roster_week=week,
+            team_id=team_id,
+            team_name=f"Team {team_id}",
+            projected_count=0,
+            skipped_count=0,
+            players=[],
+        )
+
+    monkeypatch.setattr(
+        espn_route,
+        "build_team_projection_response",
+        fake_projection_response,
+    )
+
+    result = espn_route.build_matchup_response(
+        league=league,
+        league_id=123,
+        season=2026,
+        team_id=2,
+        week=4,
+    )
+
+    assert result.home.team_id == 1
+    assert result.away.team_id == 2
+    assert result.home_score == 101.5
+    assert result.away_score == 98.25

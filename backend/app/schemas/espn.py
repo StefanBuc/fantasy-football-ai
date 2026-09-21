@@ -9,6 +9,14 @@ class ESPNTeamSummary(BaseModel):
     team_name: str
     abbreviation: str
     logo_url: str | None = None
+    standing: int
+    wins: int
+    losses: int
+    ties: int
+    points_for: float
+    points_against: float
+    streak: str | None = None
+    playoff_pct: float | None = None
 
 
 class ESPNLeagueConnectResponse(BaseModel):
@@ -67,3 +75,14 @@ class ESPNTeamProjectionResponse(BaseModel):
     projected_count: int
     skipped_count: int
     players: list[ESPNRosterProjectionResponse]
+
+
+class ESPNMatchupResponse(BaseModel):
+    league_id: int
+    league_name: str
+    season: int
+    week: int
+    home_score: float
+    away_score: float
+    home: ESPNTeamProjectionResponse
+    away: ESPNTeamProjectionResponse

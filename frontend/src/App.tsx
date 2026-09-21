@@ -1,9 +1,10 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import {
   LeagueDashboard,
   type ConnectionMode,
 } from './components/LeagueDashboard'
+import { ThemeToggle } from './components/ThemeToggle'
 import {
   connectLeague,
   connectLocalLeague,
@@ -23,6 +24,15 @@ const showLocalLeagueOption = import.meta.env.DEV
 
 function hasConnectedLeague(league: ESPNLeague | null): boolean {
   return league !== null
+}
+
+function getInitialDarkMode(): boolean {
+  const savedTheme = localStorage.getItem('fantasy-theme')
+  if (savedTheme) {
+    return savedTheme === 'dark'
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
 const positionStyles: Record<string, string> = {
@@ -112,6 +122,7 @@ function PlayerRow({ player }: { player: RosterProjection }) {
 }
 
 function App() {
+  const [isDark, setIsDark] = useState(getInitialDarkMode)
   const [leagueId, setLeagueId] = useState('')
   const [season, setSeason] = useState(currentSeason)
   const [league, setLeague] = useState<ESPNLeague | null>(null)
@@ -123,6 +134,14 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isProjecting, setIsProjecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark)
+    localStorage.setItem(
+      'fantasy-theme',
+      isDark ? 'dark' : 'light',
+    )
+  }, [isDark])
 
   const selectedTeam = useMemo(
     () => league?.teams.find((team) => team.team_id === selectedTeamId),
@@ -251,12 +270,14 @@ function App() {
         league={league as ESPNLeague}
         connectionMode={connectionMode}
         onDisconnect={resetLeague}
+        isDark={isDark}
+        onToggleDark={() => setIsDark((current) => !current)}
       />
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f7f2] text-slate-900">
+    <div className="min-h-screen bg-[#f5f7f2] text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <header className="border-b border-slate-200/80 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
           <div className="flex items-center gap-3">
@@ -266,9 +287,15 @@ function App() {
               <p className="text-xs font-medium text-slate-500">Weekly lineup intelligence</p>
             </div>
           </div>
-          <div className="hidden items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 sm:flex">
-            <span className="size-2 rounded-full bg-emerald-500" />
-            PyTorch models ready
+          <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 sm:flex">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              PyTorch models ready
+            </div>
+            <ThemeToggle
+              isDark={isDark}
+              onToggle={() => setIsDark((current) => !current)}
+            />
           </div>
         </div>
       </header>

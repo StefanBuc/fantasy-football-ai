@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   getLocalTeamProjections,
+  getTeamLogoUrl,
   getTeamProjections,
 } from '../lib/api'
 import type {
@@ -10,24 +11,30 @@ import type {
   RosterProjection,
   TeamProjectionResponse,
 } from '../types/api'
+import { LeagueStandings } from './LeagueStandings'
+import { MatchupView } from './MatchupView'
+import { ThemeToggle } from './ThemeToggle'
 
 export type ConnectionMode = 'public' | 'local'
+type DashboardView = 'team' | 'matchup' | 'league'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
   connectionMode: ConnectionMode
   onDisconnect: () => void
+  isDark: boolean
+  onToggleDark: () => void
 }
 
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
 
 const positionStyles: Record<string, string> = {
-  QB: 'bg-violet-100 text-violet-700',
-  RB: 'bg-emerald-100 text-emerald-700',
-  WR: 'bg-sky-100 text-sky-700',
-  TE: 'bg-amber-100 text-amber-700',
-  K: 'bg-rose-100 text-rose-700',
-  'D/ST': 'bg-slate-200 text-slate-700',
+  QB: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-200',
+  RB: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200',
+  WR: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-200',
+  TE: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200',
+  K: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-200',
+  'D/ST': 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-100',
 }
 
 const starterSlotOrder = [
@@ -42,33 +49,52 @@ const starterSlotOrder = [
   'K',
 ]
 
-function TeamAvatar({ team }: { team: ESPNTeamSummary | undefined }) {
-  if (team?.logo_url) {
-    return (
-      <img
-        src={team.logo_url}
-        alt=""
-        className="size-16 rounded-2xl bg-white object-contain p-2 ring-1 ring-slate-200"
-      />
-    )
+function displayLineupSlot(slot: string): string {
+  if (['RB/WR/TE', 'RB/WR', 'WR/TE'].includes(slot)) {
+    return 'FLEX'
   }
 
+  return slot
+}
+
+function TeamAvatar({
+  team,
+  connectionMode,
+}: {
+  team: ESPNTeamSummary | undefined
+  connectionMode: ConnectionMode
+}) {
+  const logoUrl = team
+    ? getTeamLogoUrl(team.team_id, team.logo_url, connectionMode)
+    : null
   return (
-    <div className="grid size-16 place-items-center rounded-2xl bg-slate-900 text-lg font-black tracking-wider text-lime-300">
-      {team?.abbreviation.slice(0, 3) ?? 'FF'}
+    <div className="relative grid size-16 place-items-center overflow-hidden rounded-full bg-slate-900 text-lg font-black tracking-wider text-lime-300 ring-2 ring-white shadow-sm dark:ring-slate-700">
+      <span>{team?.abbreviation.slice(0, 3) ?? 'FF'}</span>
+      {logoUrl && (
+        <img
+          src={logoUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={(event) => {
+            event.currentTarget.style.display = 'none'
+          }}
+          className="absolute inset-0 size-full bg-white object-cover"
+        />
+      )}
     </div>
   )
 }
 
 function PlayerRow({ player }: { player: RosterProjection }) {
   const positionClass =
-    positionStyles[player.position] ?? 'bg-slate-100 text-slate-700'
+    positionStyles[player.position]
+    ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100'
 
   return (
     <div className="grid min-h-20 grid-cols-[52px_minmax(0,1fr)_74px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 sm:grid-cols-[70px_minmax(0,1fr)_150px_90px_100px] sm:px-6">
       <div>
-        <span className="text-xs font-black uppercase tracking-wide text-slate-500">
-          {player.lineup_slot}
+        <span className="text-xs font-black uppercase tracking-wide text-slate-500 dark:text-slate-300">
+          {displayLineupSlot(player.lineup_slot)}
         </span>
       </div>
 
@@ -82,14 +108,14 @@ function PlayerRow({ player }: { player: RosterProjection }) {
           <p className="truncate text-sm font-extrabold text-slate-950 sm:text-base">
             {player.player_name}
           </p>
-          <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+          <p className="mt-1 truncate text-xs font-semibold text-slate-500 dark:text-slate-300">
             <span className="sm:hidden">{player.position} · </span>
             {player.team ?? 'Team unavailable'}
           </p>
         </div>
       </div>
 
-      <p className="text-right text-xs font-bold text-slate-600 sm:text-left sm:text-sm">
+      <p className="text-right text-xs font-bold text-slate-600 dark:text-slate-200 sm:text-left sm:text-sm">
         {player.opponent_team ? `vs ${player.opponent_team}` : '—'}
       </p>
 
@@ -97,8 +123,8 @@ function PlayerRow({ player }: { player: RosterProjection }) {
         <span
           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
             player.status === 'projected'
-              ? 'bg-emerald-50 text-emerald-700'
-              : 'bg-amber-50 text-amber-700'
+              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200'
+              : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200'
           }`}
         >
           {player.status === 'projected' ? 'Ready' : 'Unavailable'}
@@ -175,6 +201,8 @@ export function LeagueDashboard({
   league,
   connectionMode,
   onDisconnect,
+  isDark,
+  onToggleDark,
 }: LeagueDashboardProps) {
   const [selectedTeamId, setSelectedTeamId] = useState(
     league.teams[0]?.team_id ?? 0,
@@ -183,6 +211,7 @@ export function LeagueDashboard({
   const [projection, setProjection] = useState<TeamProjectionResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activeView, setActiveView] = useState<DashboardView>('team')
   const initialRequestStarted = useRef(false)
 
   const selectedTeam = useMemo(
@@ -274,7 +303,7 @@ export function LeagueDashboard({
   }
 
   return (
-    <div className="min-h-screen bg-[#f3f5f2] text-slate-900">
+    <div className="min-h-screen bg-[#f3f5f2] text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <header className="bg-slate-950 text-white shadow-lg">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
@@ -286,27 +315,49 @@ export function LeagueDashboard({
               <p className="text-xs font-semibold text-slate-400">Fantasy Football AI</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onDisconnect}
-            className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-slate-200 transition hover:border-white/30 hover:bg-white/10"
-          >
-            Change league
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle isDark={isDark} onToggle={onToggleDark} />
+            <button
+              type="button"
+              onClick={onDisconnect}
+              className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-slate-200 transition hover:border-white/30 hover:bg-white/10"
+            >
+              Change league
+            </button>
+          </div>
         </div>
         <nav className="mx-auto flex max-w-7xl gap-7 overflow-x-auto px-4 sm:px-8" aria-label="League navigation">
-          <span className="border-b-2 border-lime-300 pb-3 text-sm font-black text-white">My team</span>
-          <span className="pb-3 text-sm font-bold text-slate-500">Matchup</span>
-          <span className="pb-3 text-sm font-bold text-slate-500">Players</span>
-          <span className="pb-3 text-sm font-bold text-slate-500">League</span>
+          {([
+            ['team', 'My team'],
+            ['matchup', 'Matchup'],
+            ['league', 'League'],
+          ] as const).map(([view, label]) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setActiveView(view)}
+              className={`border-b-2 pb-3 text-sm font-black transition ${
+                activeView === view
+                  ? 'border-lime-300 text-white'
+                  : 'border-transparent text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </nav>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-9">
+        {activeView === 'team' && (
+          <>
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
-              <TeamAvatar team={selectedTeam} />
+              <TeamAvatar
+                team={selectedTeam}
+                connectionMode={connectionMode}
+              />
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-emerald-700">
                   {league.season} season · {connectionMode === 'local' ? 'Private league' : 'Public league'}
@@ -426,6 +477,27 @@ export function LeagueDashboard({
             <p className="font-black text-slate-800">Choose a team and week</p>
             <p className="mt-2 text-sm text-slate-500">Then update projections to load the complete roster.</p>
           </div>
+        )}
+          </>
+        )}
+
+        {activeView === 'matchup' && (
+          <MatchupView
+            league={league}
+            connectionMode={connectionMode}
+            selectedTeamId={selectedTeamId}
+            week={week}
+            onTeamChange={changeTeam}
+            onWeekChange={changeWeek}
+          />
+        )}
+
+        {activeView === 'league' && (
+          <LeagueStandings
+            league={league}
+            selectedTeamId={selectedTeamId}
+            connectionMode={connectionMode}
+          />
         )}
       </main>
     </div>
