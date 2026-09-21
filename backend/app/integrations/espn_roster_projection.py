@@ -28,6 +28,8 @@ SUPPORTED_POSITIONS = {
     "RB",
     "WR",
     "TE",
+    "K",
+    "DST",
 }
 
 
@@ -51,6 +53,7 @@ class ESPNRosterPlayer:
     player_name: str
     position: str
     lineup_slot: str
+    team: str | None = None
 
 
 def build_espn_projection_request(
@@ -68,6 +71,34 @@ def build_espn_projection_request(
             None,
             player_match.reason
             or "ESPN player was not matched to an NFL player.",
+        )
+
+    if (
+        player_match.position == "DST"
+        or player_match.player_id.startswith("TEAM:")
+    ):
+        team = player_match.player_id.replace(
+            "TEAM:", "", 1
+        ).upper()
+        opponent = opponents.get(team)
+
+        if opponent is None:
+            return None, f"{team} does not play during week {week}."
+
+        return (
+            PlayerProjectionRequest(
+                player_id=(
+                    player_match.player_id
+                    if player_match.player_id.startswith("TEAM:")
+                    else team
+                ),
+                player_name=player_match.espn_name,
+                team=team,
+                season=season,
+                upcoming_week=week,
+                opponent_team=opponent,
+            ),
+            None,
         )
 
     required_columns = {
@@ -148,6 +179,8 @@ def build_espn_request_batches(
         "RB": [],
         "WR": [],
         "TE": [],
+        "K": [],
+        "DST": [],
     }
 
     skipped: dict[int, str] = {}
@@ -219,7 +252,54 @@ def project_espn_roster(
     player_matches = []
 
     for player in roster_players:
-        if player.position not in SUPPORTED_POSITIONS:
+        model_position = (
+            "DST"
+            if player.position == "D/ST"
+            else player.position
+        )
+
+        if model_position == "DST":
+            player_matches.append(
+                ESPNPlayerMatch(
+                    espn_id=player.espn_id,
+                    espn_name=player.player_name,
+                    position="DST",
+                    player_id=player.team,
+                    status=(
+                        "matched"
+                        if player.team is not None
+                        else "missing"
+                    ),
+                    reason=(
+                        None
+                        if player.team is not None
+                        else "ESPN did not provide a defense team."
+                    ),
+                )
+            )
+            continue
+
+        if model_position == "K" and player.team is not None:
+            matched_kicker = match_espn_player(
+                id_map=id_map,
+                espn_id=player.espn_id,
+                espn_name=player.player_name,
+                position="K",
+            )
+
+            if matched_kicker.status != "matched":
+                matched_kicker = ESPNPlayerMatch(
+                    espn_id=player.espn_id,
+                    espn_name=player.player_name,
+                    position="K",
+                    player_id=f"TEAM:{player.team}",
+                    status="matched",
+                )
+
+            player_matches.append(matched_kicker)
+            continue
+
+        if model_position not in SUPPORTED_POSITIONS:
             player_matches.append(
                 ESPNPlayerMatch(
                     espn_id=player.espn_id,
@@ -240,7 +320,7 @@ def project_espn_roster(
                 id_map=id_map,
                 espn_id=player.espn_id,
                 espn_name=player.player_name,
-                position=player.position,
+                position=model_position,
             )
         )
 

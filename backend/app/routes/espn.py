@@ -40,6 +40,19 @@ LOCAL_CLIENT_HOSTS = {
     "testclient",
 }
 
+ESPN_TEAM_ALIASES = {
+    "LAR": "LA",
+    "WSH": "WAS",
+}
+
+
+def normalize_espn_team(team: str) -> str:
+    normalized = team.upper()
+    return ESPN_TEAM_ALIASES.get(
+        normalized,
+        normalized,
+    )
+
 
 @lru_cache(maxsize=2)
 def get_espn_projection_service(
@@ -212,6 +225,13 @@ def build_team_projection_response(
             player_name=str(player.name),
             position=str(player.position).upper(),
             lineup_slot=str(player.lineupSlot),
+            team=(
+                normalize_espn_team(
+                    str(player.proTeam)
+                )
+                if getattr(player, "proTeam", None)
+                else None
+            ),
         )
         for player in team.roster
     ]

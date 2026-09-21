@@ -339,9 +339,9 @@ def test_projection_keeps_unsupported_roster_players(
     fake_league.teams[0].roster.append(
         SimpleNamespace(
             playerId=999,
-            name="Test Kicker",
-            position="K",
-            lineupSlot="K",
+            name="Test Punter",
+            position="P",
+            lineupSlot="P",
         )
     )
 
@@ -370,9 +370,9 @@ def test_projection_keeps_unsupported_roster_players(
     assert response.status_code == 200
     body = response.json()
     assert len(body["players"]) == 2
-    kicker = body["players"][1]
-    assert kicker["player_name"] == "Test Kicker"
-    assert kicker["status"] == "skipped"
-    assert kicker["reason"] == (
-        "AI projections are not supported for K yet."
+    punter = body["players"][1]
+    assert punter["player_name"] == "Test Punter"
+    assert punter["status"] == "skipped"
+    assert punter["reason"] == (
+        "AI projections are not supported for P yet."
     )

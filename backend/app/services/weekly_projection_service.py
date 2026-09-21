@@ -10,12 +10,20 @@ from app.services.projection_types import (
     PlayerProjectionRequest,
     ProjectionSlateResult,
 )
+from app.services.special_teams_data import (
+    load_special_teams_weekly,
+)
+from app.services.special_teams_inference import (
+    SpecialTeamsProjectionService,
+)
 
 SUPPORTED_POSITIONS = {
     "QB",
     "RB",
     "WR",
     "TE",
+    "K",
+    "DST",
 }
 
 '''
@@ -51,13 +59,14 @@ class WeeklyProjectionService:
         # is requested, then reused.
         self.position_services: dict[
             str,
-            PyTorchProjectionService,
+            PyTorchProjectionService | SpecialTeamsProjectionService,
         ] = {}
+        self.special_teams_data = None
 
     def _get_position_service(
         self,
         position: str,
-    ) -> PyTorchProjectionService:
+    ) -> PyTorchProjectionService | SpecialTeamsProjectionService:
         normalized_position = position.upper()
 
         if (
@@ -72,13 +81,30 @@ class WeeklyProjectionService:
             normalized_position
             not in self.position_services
         ):
-            self.position_services[
-                normalized_position
-            ] = PyTorchProjectionService(
-                position=normalized_position,
-                player_df=self.player_df,
-                defense_df=self.defense_df,
-            )
+            if normalized_position in {"K", "DST"}:
+                if self.special_teams_data is None:
+                    self.special_teams_data = (
+                        load_special_teams_weekly(
+                            [self.season - 1, self.season]
+                        )
+                    )
+
+                self.position_services[normalized_position] = (
+                    SpecialTeamsProjectionService(
+                        position=normalized_position,
+                        weekly_df=self.special_teams_data[
+                            normalized_position
+                        ],
+                    )
+                )
+            else:
+                self.position_services[normalized_position] = (
+                    PyTorchProjectionService(
+                        position=normalized_position,
+                        player_df=self.player_df,
+                        defense_df=self.defense_df,
+                    )
+                )
 
         return self.position_services[
             normalized_position

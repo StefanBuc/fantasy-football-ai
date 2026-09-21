@@ -251,7 +251,7 @@ class NFLData:
             & (self.weekly_rosters["week"] == week)
             & (
                 self.weekly_rosters["position"].isin(
-                    ["QB", "RB", "WR", "TE"]
+                    ["QB", "RB", "WR", "TE", "K"]
                 )
             )
             & (self.weekly_rosters["status"] == "ACT")
@@ -539,7 +539,7 @@ class NFLData:
 
         player_ids = player_ids[
             player_ids["position"].isin(
-                ["QB", "RB", "WR", "TE"]
+                ["QB", "RB", "WR", "TE", "K"]
             )
             & player_ids["espn_id"].notna()
             & player_ids["gsis_id"].notna()
