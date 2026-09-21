@@ -1,6 +1,10 @@
 import { useMemo, useState, type FormEvent } from 'react'
 
 import {
+  LeagueDashboard,
+  type ConnectionMode,
+} from './components/LeagueDashboard'
+import {
   connectLeague,
   connectLocalLeague,
   getLocalTeamProjections,
@@ -17,7 +21,9 @@ const currentSeason = new Date().getFullYear()
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
 const showLocalLeagueOption = import.meta.env.DEV
 
-type ConnectionMode = 'public' | 'local'
+function hasConnectedLeague(league: ESPNLeague | null): boolean {
+  return league !== null
+}
 
 const positionStyles: Record<string, string> = {
   QB: 'bg-violet-100 text-violet-700 ring-violet-200',
@@ -237,6 +243,16 @@ function App() {
     setSelectedTeamId(null)
     setConnectionMode('public')
     setError(null)
+  }
+
+  if (hasConnectedLeague(league)) {
+    return (
+      <LeagueDashboard
+        league={league as ESPNLeague}
+        connectionMode={connectionMode}
+        onDisconnect={resetLeague}
+      />
+    )
   }
 
   return (

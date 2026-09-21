@@ -14,6 +14,7 @@ class ESPNTeamSummary(BaseModel):
 class ESPNLeagueConnectResponse(BaseModel):
     league_id: int
     season: int
+    current_week: int
     league_name: str
     team_count: int
     teams: list[ESPNTeamSummary]
@@ -60,6 +61,7 @@ class ESPNTeamProjectionResponse(BaseModel):
     league_name: str
     season: int
     week: int
+    roster_week: int
     team_id: int
     team_name: str
     projected_count: int

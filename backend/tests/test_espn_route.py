@@ -17,6 +17,7 @@ from app.services.projection_types import (
 
 def test_connect_public_league(monkeypatch):
     fake_league = SimpleNamespace(
+        current_week=3,
         settings=SimpleNamespace(
             name="Test Fantasy League",
         ),
@@ -58,6 +59,7 @@ def test_connect_public_league(monkeypatch):
 
     assert body["league_id"] == 123456789
     assert body["season"] == 2026
+    assert body["current_week"] == 3
     assert body["league_name"] == "Test Fantasy League"
     assert body["team_count"] == 2
     assert body["teams"][0]["team_name"] == (
@@ -113,6 +115,9 @@ class FakeNFLData:
 
     def get_week_opponents(self, season, week):
         return {"ATL": "TB"}
+
+    def get_projection_roster(self, season, week):
+        return self.get_week_roster(season, week), week
 
     def get_player_id_map(self):
         return pd.DataFrame(
@@ -193,6 +198,7 @@ def test_public_team_projection_endpoint(monkeypatch):
     body = response.json()
 
     assert body["team_id"] == 1
+    assert body["roster_week"] == 1
     assert body["projected_count"] == 1
     assert body["skipped_count"] == 0
     assert body["players"][0] == {
@@ -324,3 +330,49 @@ def test_local_private_route_is_hidden_when_disabled(
     )
 
     assert response.status_code == 404
+
+
+def test_projection_keeps_unsupported_roster_players(
+    monkeypatch,
+):
+    fake_league = make_private_league()
+    fake_league.teams[0].roster.append(
+        SimpleNamespace(
+            playerId=999,
+            name="Test Kicker",
+            position="K",
+            lineupSlot="K",
+        )
+    )
+
+    monkeypatch.setattr(
+        espn_route,
+        "get_public_league",
+        lambda league_id, season: fake_league,
+    )
+    monkeypatch.setattr(
+        espn_route,
+        "get_espn_projection_service",
+        lambda season: FakeESPNProjectionService(),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/espn/projections",
+        json={
+            "league_id": 123,
+            "season": 2024,
+            "team_id": 1,
+            "week": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["players"]) == 2
+    kicker = body["players"][1]
+    assert kicker["player_name"] == "Test Kicker"
+    assert kicker["status"] == "skipped"
+    assert kicker["reason"] == (
+        "AI projections are not supported for K yet."
+    )

@@ -286,6 +286,44 @@ class NFLData:
                 "status",
             ]
         ].reset_index(drop=True)
+
+    def get_projection_roster(
+        self,
+        season: int,
+        week: int,
+    ) -> tuple[pd.DataFrame, int]:
+        if self.weekly_rosters is None:
+            raise ValueError(
+                "Weekly rosters have not been loaded. "
+                "Call load_weekly_rosters() first."
+            )
+
+        season_rosters = self.weekly_rosters[
+            self.weekly_rosters["season"] == season
+        ].copy()
+
+        available_weeks = sorted(
+            {
+                int(available_week)
+                for available_week in season_rosters["week"]
+                if int(available_week) <= week
+            },
+            reverse=True,
+        )
+
+        for roster_week in available_weeks:
+            roster = self.get_week_roster(
+                season=season,
+                week=roster_week,
+            )
+
+            if not roster.empty:
+                return roster, roster_week
+
+        return self.get_week_roster(
+            season=season,
+            week=week,
+        ), week
     
     def get_week_opponents(
         self,

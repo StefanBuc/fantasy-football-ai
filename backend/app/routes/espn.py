@@ -34,13 +34,6 @@ from app.services.weekly_projection_service import (
 
 router = APIRouter(prefix="/api/espn", tags=["espn"])
 
-SUPPORTED_POSITIONS = {
-    "QB",
-    "RB",
-    "WR",
-    "TE",
-}
-
 LOCAL_CLIENT_HOSTS = {
     "127.0.0.1",
     "::1",
@@ -172,6 +165,11 @@ def build_league_connect_response(
     league_id: int,
     season: int,
 ) -> ESPNLeagueConnectResponse:
+    current_week = min(
+        max(int(getattr(league, "current_week", 1)), 1),
+        18,
+    )
+
     teams = [
         ESPNTeamSummary(
             team_id=int(team.team_id),
@@ -189,6 +187,7 @@ def build_league_connect_response(
     return ESPNLeagueConnectResponse(
         league_id=league_id,
         season=season,
+        current_week=current_week,
         league_name=str(league.settings.name),
         team_count=len(teams),
         teams=teams,
@@ -215,17 +214,17 @@ def build_team_projection_response(
             lineup_slot=str(player.lineupSlot),
         )
         for player in team.roster
-        if str(player.position).upper()
-        in SUPPORTED_POSITIONS
     ]
 
     try:
         service = get_espn_projection_service(
             season=season
         )
-        roster_df = service.data.get_week_roster(
-            season=season,
-            week=week,
+        roster_df, roster_week = (
+            service.data.get_projection_roster(
+                season=season,
+                week=week,
+            )
         )
         opponents = service.data.get_week_opponents(
             season=season,
@@ -274,6 +273,7 @@ def build_team_projection_response(
         league_name=str(league.settings.name),
         season=season,
         week=week,
+        roster_week=roster_week,
         team_id=team_id,
         team_name=str(team.team_name),
         projected_count=projected_count,

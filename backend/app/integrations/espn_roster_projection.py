@@ -23,6 +23,13 @@ RosterProjectionStatus = Literal[
     "skipped",
 ]
 
+SUPPORTED_POSITIONS = {
+    "QB",
+    "RB",
+    "WR",
+    "TE",
+}
+
 
 @dataclass(frozen=True)
 class ESPNRosterProjection:
@@ -209,15 +216,33 @@ def project_espn_roster(
     season: int,
     week: int,
 ) -> list[ESPNRosterProjection]:
-    player_matches = [
-        match_espn_player(
-            id_map=id_map,
-            espn_id=player.espn_id,
-            espn_name=player.player_name,
-            position=player.position,
+    player_matches = []
+
+    for player in roster_players:
+        if player.position not in SUPPORTED_POSITIONS:
+            player_matches.append(
+                ESPNPlayerMatch(
+                    espn_id=player.espn_id,
+                    espn_name=player.player_name,
+                    position=player.position,
+                    player_id=None,
+                    status="missing",
+                    reason=(
+                        "AI projections are not supported "
+                        f"for {player.position} yet."
+                    ),
+                )
+            )
+            continue
+
+        player_matches.append(
+            match_espn_player(
+                id_map=id_map,
+                espn_id=player.espn_id,
+                espn_name=player.player_name,
+                position=player.position,
+            )
         )
-        for player in roster_players
-    ]
 
     requests_by_position, request_skips = (
         build_espn_request_batches(

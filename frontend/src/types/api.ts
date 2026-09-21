@@ -8,6 +8,7 @@ export type ESPNTeamSummary = {
 export type ESPNLeague = {
   league_id: number
   season: number
+  current_week: number
   league_name: string
   team_count: number
   teams: ESPNTeamSummary[]
@@ -31,6 +32,7 @@ export type TeamProjectionResponse = {
   league_name: string
   season: number
   week: number
+  roster_week: number
   team_id: number
   team_name: string
   projected_count: number

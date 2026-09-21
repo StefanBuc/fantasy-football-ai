@@ -57,3 +57,30 @@ def test_weekly_data_uses_new_nflverse_release_after_404(
     assert "team" not in result.columns
     assert result.loc[0, "recent_team"] == "BUF"
     assert result["fantasy_points"].dtype == np.float32
+
+
+def test_projection_roster_uses_latest_available_week():
+    data = NFLData([2026])
+    data.weekly_rosters = pd.DataFrame(
+        [
+            {
+                "player_id": "player-1",
+                "player_name": "Future Player",
+                "position": "RB",
+                "team": "BUF",
+                "season": 2026,
+                "week": 2,
+                "status": "ACT",
+            }
+        ]
+    )
+
+    roster, roster_week = data.get_projection_roster(
+        season=2026,
+        week=3,
+    )
+
+    assert roster_week == 2
+    assert roster["player_id"].tolist() == [
+        "player-1"
+    ]
