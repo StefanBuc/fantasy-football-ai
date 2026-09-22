@@ -96,6 +96,8 @@ function TeamLogo({
 }
 
 function MatchupPlayer({ player }: { player: RosterProjection }) {
+  const showInjury = player.availability !== 'healthy'
+
   return (
     <div className="grid grid-cols-[44px_minmax(0,1fr)_58px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-0">
       <span className="text-xs font-black text-slate-400">
@@ -104,6 +106,20 @@ function MatchupPlayer({ player }: { player: RosterProjection }) {
       <div className="min-w-0">
         <p className="truncate text-sm font-bold text-slate-900">
           {player.player_name}
+          {showInjury && (
+            <span
+              title={player.adjustment_reason ?? undefined}
+              className={`ml-2 inline-flex rounded px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wide ${
+                player.availability === 'unavailable'
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200'
+                  : player.availability === 'doubtful'
+                    ? 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200'
+                    : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200'
+              }`}
+            >
+              {player.injury_status ?? 'Injury'}
+            </span>
+          )}
         </p>
         <p className="mt-0.5 text-xs text-slate-500">
           {player.position} · {player.team ?? '—'}

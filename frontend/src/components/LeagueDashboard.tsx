@@ -37,6 +37,25 @@ const positionStyles: Record<string, string> = {
   'D/ST': 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-100',
 }
 
+const availabilityStyles: Record<
+  RosterProjection['availability'],
+  string
+> = {
+  healthy: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200',
+  questionable: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200',
+  doubtful: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200',
+  unavailable: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200',
+  unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100',
+}
+
+function playerStatusLabel(player: RosterProjection): string {
+  if (player.availability !== 'healthy') {
+    return player.injury_status ?? 'Injury update'
+  }
+
+  return player.status === 'projected' ? 'Ready' : 'Unavailable'
+}
+
 const starterSlotOrder = [
   'QB',
   'RB',
@@ -89,6 +108,11 @@ function PlayerRow({ player }: { player: RosterProjection }) {
   const positionClass =
     positionStyles[player.position]
     ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100'
+  const statusClass = player.availability !== 'healthy'
+    ? availabilityStyles[player.availability]
+    : player.status === 'projected'
+      ? availabilityStyles.healthy
+      : availabilityStyles.questionable
 
   return (
     <div className="grid min-h-20 grid-cols-[52px_minmax(0,1fr)_74px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 sm:grid-cols-[70px_minmax(0,1fr)_150px_90px_100px] sm:px-6">
@@ -121,13 +145,10 @@ function PlayerRow({ player }: { player: RosterProjection }) {
 
       <div className="hidden sm:block">
         <span
-          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
-            player.status === 'projected'
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200'
-              : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200'
-          }`}
+          title={player.adjustment_reason ?? undefined}
+          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${statusClass}`}
         >
-          {player.status === 'projected' ? 'Ready' : 'Unavailable'}
+          {playerStatusLabel(player)}
         </span>
       </div>
 
@@ -145,7 +166,12 @@ function PlayerRow({ player }: { player: RosterProjection }) {
 
       <div className="col-span-3 -mt-1 flex items-center justify-between sm:hidden">
         <p className="truncate pr-4 text-xs text-slate-400">
-          {player.status === 'skipped' ? player.reason : 'AI projection ready'}
+          {player.adjustment_reason
+            ?? (player.availability !== 'healthy'
+              ? playerStatusLabel(player)
+              : player.status === 'skipped'
+                ? player.reason
+                : 'AI projection ready')}
         </p>
         <p className="shrink-0 text-lg font-black tabular-nums text-slate-950">
           {player.predicted_points !== null

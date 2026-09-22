@@ -30,8 +30,17 @@ export type RosterProjection = {
   lineup_slot: string
   team: string | null
   opponent_team: string | null
+  base_predicted_points: number | null
   predicted_points: number | null
   status: 'projected' | 'skipped'
+  injury_status: string | null
+  availability:
+    | 'healthy'
+    | 'questionable'
+    | 'doubtful'
+    | 'unavailable'
+    | 'unknown'
+  adjustment_reason: string | null
   reason: string | null
 }
 
@@ -43,6 +52,8 @@ export type TeamProjectionResponse = {
   roster_week: number
   team_id: number
   team_name: string
+  generated_at: string
+  cache_hit: boolean
   projected_count: number
   skipped_count: number
   players: RosterProjection[]

@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import requests as http_requests
@@ -16,10 +16,6 @@ from app.config.espn_config import (
     local_espn_api_enabled,
 )
 from app.integrations.espn_fantasy import get_league
-from app.integrations.espn_roster_projection import (
-    ESPNRosterPlayer,
-    project_espn_roster,
-)
 from app.schemas.espn import (
     ESPNLeagueConnectRequest,
     ESPNLeagueConnectResponse,
@@ -32,6 +28,11 @@ from app.schemas.espn import (
 )
 from app.services.weekly_projection_service import (
     WeeklyProjectionService,
+)
+from app.services.espn_projection_cache import (
+    ESPNProjectionCache,
+    build_league_week_projection,
+    roster_fingerprint,
 )
 
 
@@ -48,6 +49,19 @@ ESPN_TEAM_ALIASES = {
     "WSH": "WAS",
 }
 
+UNAVAILABLE_INJURY_STATUSES = {
+    "OUT",
+    "IR",
+    "INJURY_RESERVE",
+    "INJURED_RESERVE",
+    "PUP",
+    "NFI",
+    "SUSPENDED",
+    "SUSPENSION",
+}
+
+projection_cache = ESPNProjectionCache()
+
 
 def normalize_espn_team(team: str) -> str:
     normalized = team.upper()
@@ -55,6 +69,40 @@ def normalize_espn_team(team: str) -> str:
         normalized,
         normalized,
     )
+
+
+def normalize_injury_status(
+    injury_status: Any,
+) -> str | None:
+    if injury_status is None:
+        return None
+
+    normalized = str(injury_status).strip().upper()
+    return normalized or None
+
+
+def classify_availability(
+    injury_status: str | None,
+) -> Literal[
+    "healthy",
+    "questionable",
+    "doubtful",
+    "unavailable",
+    "unknown",
+]:
+    if injury_status is None or injury_status in {
+        "ACTIVE",
+        "HEALTHY",
+        "NORMAL",
+    }:
+        return "healthy"
+    if injury_status == "QUESTIONABLE":
+        return "questionable"
+    if injury_status == "DOUBTFUL":
+        return "doubtful"
+    if injury_status in UNAVAILABLE_INJURY_STATUSES:
+        return "unavailable"
+    return "unknown"
 
 
 @lru_cache(maxsize=2)
@@ -369,47 +417,31 @@ def build_team_projection_response(
         team_id=team_id,
     )
 
-    roster_players = [
-        ESPNRosterPlayer(
-            espn_id=int(player.playerId),
-            player_name=str(player.name),
-            position=str(player.position).upper(),
-            lineup_slot=str(player.lineupSlot),
-            team=(
-                normalize_espn_team(
-                    str(player.proTeam)
-                )
-                if getattr(player, "proTeam", None)
-                else None
-            ),
-        )
-        for player in team.roster
-    ]
-
     try:
         service = get_espn_projection_service(
             season=season
         )
-        roster_df, roster_week = (
-            service.data.get_projection_roster(
-                season=season,
-                week=week,
+        cache_key = (
+            league_id,
+            season,
+            week,
+            roster_fingerprint(league),
+        )
+        cached_projection, cache_hit = (
+            projection_cache.get_or_create(
+                key=cache_key,
+                builder=lambda: build_league_week_projection(
+                    league=league,
+                    service=service,
+                    season=season,
+                    week=week,
+                    normalize_team=normalize_espn_team,
+                ),
             )
         )
-        opponents = service.data.get_week_opponents(
-            season=season,
-            week=week,
-        )
-        id_map = service.data.get_player_id_map()
-
-        projections = project_espn_roster(
-            weekly_service=service,
-            roster_players=roster_players,
-            id_map=id_map,
-            roster_df=roster_df,
-            opponents=opponents,
-            season=season,
-            week=week,
+        projections = cached_projection.team_projections.get(
+            team_id,
+            (),
         )
     except ValueError as error:
         raise HTTPException(
@@ -417,21 +449,48 @@ def build_team_projection_response(
             detail=str(error),
         ) from error
 
-    players = [
-        ESPNRosterProjectionResponse(
-            espn_id=item.espn_id,
-            player_id=item.player_id,
-            player_name=item.player_name,
-            position=item.position,
-            lineup_slot=item.lineup_slot,
-            team=item.team,
-            opponent_team=item.opponent_team,
-            predicted_points=item.predicted_points,
-            status=item.status,
-            reason=item.reason,
+    current_players = {
+        int(player.playerId): player
+        for player in team.roster
+    }
+    players = []
+
+    for item in projections:
+        current_player = current_players.get(item.espn_id)
+        injury_status = normalize_injury_status(
+            getattr(current_player, "injuryStatus", None)
         )
-        for item in projections
-    ]
+        availability = classify_availability(injury_status)
+        predicted_points = item.predicted_points
+        adjustment_reason = None
+
+        if (
+            availability == "unavailable"
+            and predicted_points is not None
+        ):
+            predicted_points = 0.0
+            adjustment_reason = (
+                f"ESPN lists this player as {injury_status}."
+            )
+
+        players.append(
+            ESPNRosterProjectionResponse(
+                espn_id=item.espn_id,
+                player_id=item.player_id,
+                player_name=item.player_name,
+                position=item.position,
+                lineup_slot=item.lineup_slot,
+                team=item.team,
+                opponent_team=item.opponent_team,
+                base_predicted_points=item.predicted_points,
+                predicted_points=predicted_points,
+                status=item.status,
+                injury_status=injury_status,
+                availability=availability,
+                adjustment_reason=adjustment_reason,
+                reason=item.reason,
+            )
+        )
 
     projected_count = sum(
         player.status == "projected"
@@ -443,9 +502,11 @@ def build_team_projection_response(
         league_name=str(league.settings.name),
         season=season,
         week=week,
-        roster_week=roster_week,
+        roster_week=cached_projection.roster_week,
         team_id=team_id,
         team_name=str(team.team_name),
+        generated_at=cached_projection.generated_at,
+        cache_hit=cache_hit,
         projected_count=projected_count,
         skipped_count=len(players) - projected_count,
         players=players,

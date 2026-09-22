@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -59,8 +59,18 @@ class ESPNRosterProjectionResponse(BaseModel):
     lineup_slot: str
     team: str | None
     opponent_team: str | None
+    base_predicted_points: float | None
     predicted_points: float | None
     status: Literal["projected", "skipped"]
+    injury_status: str | None
+    availability: Literal[
+        "healthy",
+        "questionable",
+        "doubtful",
+        "unavailable",
+        "unknown",
+    ]
+    adjustment_reason: str | None
     reason: str | None
 
 
@@ -72,6 +82,8 @@ class ESPNTeamProjectionResponse(BaseModel):
     roster_week: int
     team_id: int
     team_name: str
+    generated_at: datetime
+    cache_hit: bool
     projected_count: int
     skipped_count: int
     players: list[ESPNRosterProjectionResponse]

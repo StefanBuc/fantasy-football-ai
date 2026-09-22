@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pandas as pd
@@ -210,8 +211,12 @@ def test_public_team_projection_endpoint(monkeypatch):
         "lineup_slot": "RB",
         "team": "ATL",
         "opponent_team": "TB",
+        "base_predicted_points": 17.25,
         "predicted_points": 17.25,
         "status": "projected",
+        "injury_status": None,
+        "availability": "healthy",
+        "adjustment_reason": None,
         "reason": None,
     }
 
@@ -411,6 +416,8 @@ def test_build_matchup_response_finds_team_opponent(
             roster_week=week,
             team_id=team_id,
             team_name=f"Team {team_id}",
+            generated_at=datetime.now(timezone.utc),
+            cache_hit=False,
             projected_count=0,
             skipped_count=0,
             players=[],
@@ -434,3 +441,70 @@ def test_build_matchup_response_finds_team_opponent(
     assert result.away.team_id == 2
     assert result.home_score == 101.5
     assert result.away_score == 98.25
+
+
+def test_projection_cache_reuses_base_and_refreshes_injury(
+    monkeypatch,
+):
+    player = SimpleNamespace(
+        playerId=501,
+        name="Test Player",
+        position="RB",
+        lineupSlot="RB",
+        proTeam="ATL",
+        injuryStatus="ACTIVE",
+    )
+    fake_league = SimpleNamespace(
+        settings=SimpleNamespace(name="Test League"),
+        teams=[
+            SimpleNamespace(
+                team_id=1,
+                team_name="Test Team",
+                roster=[player],
+            )
+        ],
+    )
+    service = FakeESPNProjectionService()
+    project_calls = 0
+    original_project = service.project_requests
+
+    def count_projects(position, requests):
+        nonlocal project_calls
+        project_calls += 1
+        return original_project(position, requests)
+
+    service.project_requests = count_projects
+    monkeypatch.setattr(
+        espn_route,
+        "get_public_league",
+        lambda league_id, season: fake_league,
+    )
+    monkeypatch.setattr(
+        espn_route,
+        "get_espn_projection_service",
+        lambda season: service,
+    )
+    espn_route.projection_cache.clear()
+
+    client = TestClient(app)
+    payload = {
+        "league_id": 777,
+        "season": 2024,
+        "team_id": 1,
+        "week": 1,
+    }
+
+    first = client.post("/api/espn/projections", json=payload)
+    player.injuryStatus = "OUT"
+    second = client.post("/api/espn/projections", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["cache_hit"] is False
+    assert second.json()["cache_hit"] is True
+    assert project_calls == 1
+    adjusted = second.json()["players"][0]
+    assert adjusted["base_predicted_points"] == 17.25
+    assert adjusted["predicted_points"] == 0.0
+    assert adjusted["injury_status"] == "OUT"
+    assert adjusted["availability"] == "unavailable"
