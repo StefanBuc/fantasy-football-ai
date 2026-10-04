@@ -1,3 +1,5 @@
+from typing import cast
+
 from app.services.pytorch_inference import (
     PyTorchProjectionService,
 )
@@ -122,7 +124,7 @@ class WeeklyProjectionService:
         )
 
         return project_position_slate(
-            service=service,
+            service=cast(PyTorchProjectionService, service),
             requests=requests,
         )
 
