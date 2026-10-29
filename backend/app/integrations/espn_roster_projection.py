@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
@@ -9,7 +9,16 @@ from app.integrations.espn_player_matching import (
 )
 from app.services.projection_types import (
     PlayerProjectionRequest,
+    ProjectionMethod,
     ProjectionSlateResult,
+)
+from app.config.model_config import (
+    TEAMMATE_INJURY_FEATURE_COLS,
+)
+from app.services.teammate_injury_features import (
+    build_live_team_injury_context,
+    empty_injury_context,
+    is_unavailable_injury_status,
 )
 
 if TYPE_CHECKING:
@@ -44,6 +53,10 @@ class ESPNRosterProjection:
     opponent_team: str | None
     predicted_points: float | None
     status: RosterProjectionStatus
+    projection_method: ProjectionMethod | None = None
+    history_games: int | None = None
+    injury_context_used: bool = False
+    unavailable_teammates: int = 0
     reason: str | None = None
 
 
@@ -54,6 +67,7 @@ class ESPNRosterPlayer:
     position: str
     lineup_slot: str
     team: str | None = None
+    injury_status: str | None = None
 
 
 def build_espn_projection_request(
@@ -334,6 +348,54 @@ def project_espn_roster(
         )
     )
 
+    unavailable_players = [
+        {
+            "player_id": player_match.player_id,
+            "team": roster_player.team,
+        }
+        for roster_player, player_match in zip(
+            roster_players,
+            player_matches,
+        )
+        if (
+            roster_player.team is not None
+            and roster_player.position in {"QB", "RB", "WR", "TE"}
+            and player_match.player_id is not None
+            and not player_match.player_id.startswith("TEAM:")
+            and is_unavailable_injury_status(
+                roster_player.injury_status
+            )
+        )
+    ]
+    context_by_team = (
+        build_live_team_injury_context(
+            player_df=weekly_service.player_df,
+            unavailable_players=unavailable_players,
+            season=season,
+            week=week,
+        )
+        if unavailable_players
+        else {}
+    )
+
+    for position, requests in requests_by_position.items():
+        if position in {"K", "DST"}:
+            continue
+
+        requests_by_position[position] = [
+            replace(
+                request,
+                **{
+                    column: context_by_team.get(
+                        request.team or "",
+                        empty_injury_context(),
+                    )[column]
+                    for column in TEAMMATE_INJURY_FEATURE_COLS
+                },
+            )
+            for request in requests
+        ]
+
     batch_results = project_espn_request_batches(
         weekly_service=weekly_service,
         requests_by_position=requests_by_position,
@@ -345,8 +407,8 @@ def project_espn_roster(
         for request in requests
     }
 
-    predictions_by_player_id = {
-        projection.request.player_id: projection.predicted_points
+    projections_by_player_id = {
+        projection.request.player_id: projection
         for result in batch_results.values()
         for projection in result.projections
     }
@@ -370,9 +432,14 @@ def project_espn_roster(
             else None
         )
 
-        predicted_points = (
-            predictions_by_player_id.get(player_id)
+        player_projection = (
+            projections_by_player_id.get(player_id)
             if player_id is not None
+            else None
+        )
+        predicted_points = (
+            player_projection.predicted_points
+            if player_projection is not None
             else None
         )
 
@@ -413,6 +480,26 @@ def project_espn_roster(
                     "projected"
                     if predicted_points is not None
                     else "skipped"
+                ),
+                projection_method=(
+                    player_projection.projection_method
+                    if player_projection is not None
+                    else None
+                ),
+                history_games=(
+                    player_projection.history_games
+                    if player_projection is not None
+                    else None
+                ),
+                injury_context_used=(
+                    player_projection.injury_context_used
+                    if player_projection is not None
+                    else False
+                ),
+                unavailable_teammates=(
+                    player_projection.unavailable_teammates
+                    if player_projection is not None
+                    else 0
                 ),
                 reason=reason,
             )

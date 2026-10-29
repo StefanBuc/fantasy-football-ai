@@ -94,6 +94,10 @@ def roster_fingerprint(league) -> str:
                             getattr(player, "proTeam", "")
                             or ""
                         ).upper(),
+                        str(
+                            getattr(player, "injuryStatus", "")
+                            or ""
+                        ).upper(),
                     )
                 )
             )
@@ -116,6 +120,10 @@ def make_roster_player(
             normalize_team(str(pro_team))
             if pro_team
             else None
+        ),
+        injury_status=(
+            str(getattr(player, "injuryStatus", ""))
+            or None
         ),
     )
 

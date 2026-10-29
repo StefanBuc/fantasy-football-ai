@@ -19,6 +19,7 @@ class NFLData:
         self.schedule = None
         self.weekly_rosters = None
         self.depth_charts = None
+        self.injuries = None
 
     def _load_weekly_player_data(self) -> pd.DataFrame:
         season_frames = []
@@ -96,6 +97,26 @@ class NFLData:
         )
 
         print("NFL depth charts loaded!")
+
+    def load_injuries(self):
+        print("Loading NFL injury reports...")
+        injury_frames = []
+
+        for season in self.season:
+            try:
+                injury_frames.append(
+                    nfl.import_injuries([season])
+                )
+            except HTTPError as error:
+                if error.code != 404:
+                    raise
+
+        self.injuries = (
+            pd.concat(injury_frames, ignore_index=True)
+            if injury_frames
+            else pd.DataFrame()
+        )
+        print("NFL injury reports loaded!")
     
     def load_player_ids(self):
         print("Loading NFL player IDs...")
@@ -103,6 +124,15 @@ class NFLData:
         self.ids = nfl.import_ids()
 
         print("NFL player IDs loaded!")
+
+    def get_injuries(self) -> pd.DataFrame:
+        if self.injuries is None:
+            raise ValueError(
+                "Injury reports have not been loaded. "
+                "Call load_injuries() first."
+            )
+
+        return self.injuries.copy()
     
     def get_player_stats(self):
         if self.weekly is None:

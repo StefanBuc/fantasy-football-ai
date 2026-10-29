@@ -53,7 +53,49 @@ function playerStatusLabel(player: RosterProjection): string {
     return player.injury_status ?? 'Injury update'
   }
 
+  if (player.projection_method === 'recent_average') {
+    return `${player.history_games ?? 0}-game avg`
+  }
+
+  if (player.projection_method === 'position_average') {
+    return 'Position avg'
+  }
+
+  if (
+    player.injury_context_used
+    && player.unavailable_teammates > 0
+  ) {
+    return `${player.unavailable_teammates} teammate out`
+  }
+
   return player.status === 'projected' ? 'Ready' : 'Unavailable'
+}
+
+function projectionMethodDescription(
+  player: RosterProjection,
+): string | undefined {
+  if (player.projection_method === 'recent_average') {
+    return (
+      `Limited history: projection uses the player's `
+      + `${player.history_games ?? 0} available game(s).`
+    )
+  }
+
+  if (player.projection_method === 'position_average') {
+    return 'No player history: projection uses the historical position average.'
+  }
+
+  if (
+    player.injury_context_used
+    && player.unavailable_teammates > 0
+  ) {
+    return (
+      `The model included opportunity from `
+      + `${player.unavailable_teammates} unavailable teammate(s).`
+    )
+  }
+
+  return undefined
 }
 
 const starterSlotOrder = [
@@ -110,9 +152,19 @@ function PlayerRow({ player }: { player: RosterProjection }) {
     ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100'
   const statusClass = player.availability !== 'healthy'
     ? availabilityStyles[player.availability]
+    : (
+      player.projection_method !== 'model'
+      || (
+        player.injury_context_used
+        && player.unavailable_teammates > 0
+      )
+    )
+      ? availabilityStyles.questionable
     : player.status === 'projected'
       ? availabilityStyles.healthy
       : availabilityStyles.questionable
+  const statusDescription = player.adjustment_reason
+    ?? projectionMethodDescription(player)
 
   return (
     <div className="grid min-h-20 grid-cols-[52px_minmax(0,1fr)_74px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0 sm:grid-cols-[70px_minmax(0,1fr)_150px_90px_100px] sm:px-6">
@@ -145,7 +197,7 @@ function PlayerRow({ player }: { player: RosterProjection }) {
 
       <div className="hidden sm:block">
         <span
-          title={player.adjustment_reason ?? undefined}
+          title={statusDescription}
           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${statusClass}`}
         >
           {playerStatusLabel(player)}
@@ -167,6 +219,7 @@ function PlayerRow({ player }: { player: RosterProjection }) {
       <div className="col-span-3 -mt-1 flex items-center justify-between sm:hidden">
         <p className="truncate pr-4 text-xs text-slate-400">
           {player.adjustment_reason
+            ?? projectionMethodDescription(player)
             ?? (player.availability !== 'healthy'
               ? playerStatusLabel(player)
               : player.status === 'skipped'

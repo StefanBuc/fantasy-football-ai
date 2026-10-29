@@ -33,6 +33,14 @@ export type RosterProjection = {
   base_predicted_points: number | null
   predicted_points: number | null
   status: 'projected' | 'skipped'
+  projection_method:
+    | 'model'
+    | 'recent_average'
+    | 'position_average'
+    | null
+  history_games: number | null
+  injury_context_used: boolean
+  unavailable_teammates: number
   injury_status: string | null
   availability:
     | 'healthy'

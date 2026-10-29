@@ -34,6 +34,10 @@ from app.services.espn_projection_cache import (
     build_league_week_projection,
     roster_fingerprint,
 )
+from app.services.teammate_injury_features import (
+    is_unavailable_injury_status,
+    normalize_injury_status,
+)
 
 
 router = APIRouter(prefix="/api/espn", tags=["espn"])
@@ -49,17 +53,6 @@ ESPN_TEAM_ALIASES = {
     "WSH": "WAS",
 }
 
-UNAVAILABLE_INJURY_STATUSES = {
-    "OUT",
-    "IR",
-    "INJURY_RESERVE",
-    "INJURED_RESERVE",
-    "PUP",
-    "NFI",
-    "SUSPENDED",
-    "SUSPENSION",
-}
-
 projection_cache = ESPNProjectionCache()
 
 
@@ -69,16 +62,6 @@ def normalize_espn_team(team: str) -> str:
         normalized,
         normalized,
     )
-
-
-def normalize_injury_status(
-    injury_status: Any,
-) -> str | None:
-    if injury_status is None:
-        return None
-
-    normalized = str(injury_status).strip().upper()
-    return normalized or None
 
 
 def classify_availability(
@@ -100,7 +83,7 @@ def classify_availability(
         return "questionable"
     if injury_status == "DOUBTFUL":
         return "doubtful"
-    if injury_status in UNAVAILABLE_INJURY_STATUSES:
+    if is_unavailable_injury_status(injury_status):
         return "unavailable"
     return "unknown"
 
@@ -485,6 +468,12 @@ def build_team_projection_response(
                 base_predicted_points=item.predicted_points,
                 predicted_points=predicted_points,
                 status=item.status,
+                projection_method=item.projection_method,
+                history_games=item.history_games,
+                injury_context_used=item.injury_context_used,
+                unavailable_teammates=(
+                    item.unavailable_teammates
+                ),
                 injury_status=injury_status,
                 availability=availability,
                 adjustment_reason=adjustment_reason,

@@ -178,6 +178,7 @@ def project_position_slate(
     requests: list[PlayerProjectionRequest],
 ) -> ProjectionSlateResult:
     eligible_requests = []
+    fallback_projections = []
     skipped = []
 
     required_games = int(
@@ -192,15 +193,34 @@ def project_position_slate(
         )
 
         if available_games < required_games:
-            skipped.append(
-                SkippedPlayerProjection(
+            cold_start = service.predict_cold_start(
+                request
+            )
+
+            if cold_start is None:
+                skipped.append(
+                    SkippedPlayerProjection(
+                        request=request,
+                        available_games=available_games,
+                        required_games=required_games,
+                        reason=(
+                            "No historical data was available "
+                            "for a cold-start projection."
+                        ),
+                    )
+                )
+                continue
+
+            predicted_points, method = cold_start
+            fallback_projections.append(
+                PlayerProjection(
                     request=request,
-                    available_games=available_games,
-                    required_games=required_games,
-                    reason=(
-                        f"Requires {required_games} "
-                        f"previous games; found "
-                        f"{available_games}."
+                    position=service.position,
+                    predicted_points=predicted_points,
+                    projection_method=method,
+                    history_games=available_games,
+                    unavailable_teammates=int(
+                        request.teammate_out_count
                     ),
                 )
             )
@@ -217,12 +237,26 @@ def project_position_slate(
             request=request,
             position=service.position,
             predicted_points=prediction,
+            projection_method="model",
+            history_games=required_games,
+            injury_context_used=(
+                "teammate_out_count"
+                in service.checkpoint.get(
+                    "matchup_feature_cols",
+                    [],
+                )
+            ),
+            unavailable_teammates=int(
+                request.teammate_out_count
+            ),
         )
         for request, prediction in zip(
             eligible_requests,
             predictions,
         )
     ]
+
+    projections.extend(fallback_projections)
 
     projections.sort(
         key=lambda result: result.predicted_points,

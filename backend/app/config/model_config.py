@@ -126,6 +126,13 @@ DEFENSE_STAT_COLS = [
     "receptions_allowed",
 ]
 
+TEAMMATE_INJURY_FEATURE_COLS = [
+    "teammate_out_count",
+    "teammate_out_target_share",
+    "teammate_out_carries",
+    "teammate_out_offense_pct",
+]
+
 POSITION_CONFIGS = {
     "QB": {"hidden_size": 32, "num_layers": 1, "dropout": 0.0},
     "RB": {"hidden_size": 64, "num_layers": 2, "dropout": 0.2},

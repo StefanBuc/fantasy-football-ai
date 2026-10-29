@@ -66,3 +66,7 @@ def test_weekly_projection_endpoint_returns_contract(
     assert body["skipped_count"] == 0
     assert body["projections"][0]["player_id"] == "qb-1"
     assert body["projections"][0]["predicted_points"] == 20.5
+    assert body["projections"][0]["projection_method"] == "model"
+    assert body["projections"][0]["history_games"] is None
+    assert body["projections"][0]["injury_context_used"] is False
+    assert body["projections"][0]["unavailable_teammates"] == 0

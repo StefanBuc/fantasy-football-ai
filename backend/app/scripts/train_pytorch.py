@@ -164,9 +164,11 @@ def main():
     nfl_data = NFLData(season=args.season)
     
     nfl_data.load_data()
+    nfl_data.load_injuries()
     
     player_data = nfl_data.get_player_stats()
     defense_data = nfl_data.get_defense_stats()
+    injury_data = nfl_data.get_injuries()
     
     print(f"Player data shape: {player_data.shape}")
     print(f"Defense data shape: {defense_data.shape}")
@@ -189,6 +191,7 @@ def main():
             seasons=train_seasons,
             target_seasons=train_seasons,
             position=position,
+            injury_df=injury_data,
         )
         
         validation_dataset = PlayerSequenceDataset(
@@ -201,6 +204,7 @@ def main():
             position=position,
             scaler=train_dataset.scaler,
             matchup_scaler=train_dataset.matchup_scaler,
+            injury_df=injury_data,
         )
         
         test_dataset = PlayerSequenceDataset(
@@ -213,6 +217,7 @@ def main():
             position=position,
             scaler=train_dataset.scaler,
             matchup_scaler=train_dataset.matchup_scaler,
+            injury_df=injury_data,
         )
         
         print(f"{position} samples:")

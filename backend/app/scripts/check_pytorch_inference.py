@@ -14,6 +14,10 @@ from app.services.pytorch_projection_model import (
     predict_from_raw_features,
 )
 from app.services.defense_features import build_upcoming_defense_features
+from app.services.teammate_injury_features import (
+    build_historical_team_injury_context,
+    empty_injury_context,
+)
 from app.services.pytorch_inference import (
     PlayerProjectionRequest,
     PyTorchProjectionService,
@@ -22,6 +26,7 @@ from app.services.pytorch_inference import (
 from torch.utils.data import DataLoader, Subset
 from app.config.model_config import (
     SELECTED_PYTORCH_MODEL_VERSIONS,
+    TEAMMATE_INJURY_FEATURE_COLS,
 )
 
 import time
@@ -134,9 +139,16 @@ def main():
 
     data = NFLData(context_seasons)
     data.load_data()
-    
+    data.load_injuries()
+
+    uses_injury_context = any(
+        column in checkpoint["matchup_feature_cols"]
+        for column in TEAMMATE_INJURY_FEATURE_COLS
+    )
+
     player_df = data.get_player_stats()
     defense_df = data.get_defense_stats()
+    injury_df = data.get_injuries()
 
     dataset = PlayerSequenceDataset(
         player_df,
@@ -146,6 +158,10 @@ def main():
         position=checkpoint["position"],
         seasons=context_seasons,
         target_seasons=target_seasons,
+        matchup_feature_cols=checkpoint[
+            "matchup_feature_cols"
+        ],
+        injury_df=injury_df,
         scaler=sequence_scaler,
         matchup_scaler=matchup_scaler,
     )
@@ -198,6 +214,48 @@ def main():
         f"Weeks 6+ MAE: {later_mae:.4f} "
         f"over {len(later_indices)} samples"
     )
+
+    unavailable_teammate_indices = [
+        index
+        for index, sample in enumerate(
+            dataset.sample_metadata
+        )
+        if sample["teammate_out_count"] > 0
+    ]
+
+    no_unavailable_teammate_indices = [
+        index
+        for index, sample in enumerate(
+            dataset.sample_metadata
+        )
+        if sample["teammate_out_count"] == 0
+    ]
+
+    if unavailable_teammate_indices:
+        unavailable_teammate_mae = evaluate_dataset(
+            model,
+            Subset(dataset, unavailable_teammate_indices),
+            device,
+        )
+
+        print(
+            "Unavailable-teammate MAE: "
+            f"{unavailable_teammate_mae:.4f} over "
+            f"{len(unavailable_teammate_indices)} samples"
+        )
+
+    if no_unavailable_teammate_indices:
+        no_unavailable_teammate_mae = evaluate_dataset(
+            model,
+            Subset(dataset, no_unavailable_teammate_indices),
+            device,
+        )
+
+        print(
+            "No-unavailable-teammate MAE: "
+            f"{no_unavailable_teammate_mae:.4f} over "
+            f"{len(no_unavailable_teammate_indices)} samples"
+        )
 
     sample_index = next(
         (
@@ -274,6 +332,27 @@ def main():
         upcoming_week=metadata["week"],
     )
 
+    injury_context = empty_injury_context()
+    if uses_injury_context:
+        historical_context = (
+            build_historical_team_injury_context(
+                player_df=player_df,
+                injury_df=injury_df,
+            )
+        )
+        matching_context = historical_context[
+            (historical_context["recent_team"] == metadata["team"])
+            & (historical_context["season"] == metadata["season"])
+            & (historical_context["week"] == metadata["week"])
+        ]
+        if not matching_context.empty:
+            injury_context = {
+                column: float(matching_context.iloc[0][column])
+                for column in TEAMMATE_INJURY_FEATURE_COLS
+            }
+
+    calculated_matchup.update(injury_context)
+
     calculated_matchup_values = np.asarray(
         [
             calculated_matchup[column]
@@ -317,6 +396,7 @@ def main():
         season=metadata["season"],
         upcoming_week=metadata["week"],
         opponent_team=metadata["opponent_team"],
+        teammate_injury_context=injury_context,
     )
     
     optimized_prediction = None
@@ -338,6 +418,10 @@ def main():
             season=metadata["season"],
             upcoming_week=metadata["week"],
             opponent_team=metadata["opponent_team"],
+            teammate_injury_context={
+                column: float(metadata[column])
+                for column in TEAMMATE_INJURY_FEATURE_COLS
+            },
         )
         
         second_index = (
@@ -356,6 +440,10 @@ def main():
                 season=metadata["season"],
                 upcoming_week=metadata["week"],
                 opponent_team=metadata["opponent_team"],
+                **{
+                    column: float(metadata[column])
+                    for column in TEAMMATE_INJURY_FEATURE_COLS
+                },
             ),
             PlayerProjectionRequest(
                 player_id=second_metadata["player_id"],
@@ -364,6 +452,10 @@ def main():
                 opponent_team=second_metadata[
                     "opponent_team"
                 ],
+                **{
+                    column: float(second_metadata[column])
+                    for column in TEAMMATE_INJURY_FEATURE_COLS
+                },
             ),
         ]
 
@@ -376,6 +468,10 @@ def main():
             season=second_metadata["season"],
             upcoming_week=second_metadata["week"],
             opponent_team=second_metadata["opponent_team"],
+            teammate_injury_context={
+                column: float(second_metadata[column])
+                for column in TEAMMATE_INJURY_FEATURE_COLS
+            },
         )
 
         np.testing.assert_allclose(
@@ -407,6 +503,10 @@ def main():
                     season=sample["season"],
                     upcoming_week=sample["week"],
                     opponent_team=sample["opponent_team"],
+                    **{
+                        column: float(sample[column])
+                        for column in TEAMMATE_INJURY_FEATURE_COLS
+                    },
                 )
                 for sample in dataset.sample_metadata[
                     :benchmark_count
@@ -431,6 +531,10 @@ def main():
                     season=request.season,
                     upcoming_week=request.upcoming_week,
                     opponent_team=request.opponent_team,
+                    teammate_injury_context={
+                        column: float(getattr(request, column))
+                        for column in TEAMMATE_INJURY_FEATURE_COLS
+                    },
                 )
                 for request in benchmark_requests
             ]

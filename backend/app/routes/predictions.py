@@ -61,6 +61,14 @@ def get_weekly_projections(
             predicted_points=(
                 item.predicted_points
             ),
+            projection_method=(
+                item.projection_method
+            ),
+            history_games=item.history_games,
+            injury_context_used=item.injury_context_used,
+            unavailable_teammates=(
+                item.unavailable_teammates
+            ),
         )
         for item in result.projections
     ]

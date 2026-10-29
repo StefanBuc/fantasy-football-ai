@@ -22,6 +22,14 @@ class PlayerProjectionResponse(
     ProjectionPlayerBase
 ):
     predicted_points: float
+    projection_method: Literal[
+        "model",
+        "recent_average",
+        "position_average",
+    ]
+    history_games: int | None
+    injury_context_used: bool
+    unavailable_teammates: int
 
 
 class SkippedPlayerResponse(

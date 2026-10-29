@@ -97,6 +97,17 @@ function TeamLogo({
 
 function MatchupPlayer({ player }: { player: RosterProjection }) {
   const showInjury = player.availability !== 'healthy'
+  const fallbackLabel = player.projection_method === 'recent_average'
+    ? `${player.history_games ?? 0}-game avg`
+    : player.projection_method === 'position_average'
+      ? 'Position avg'
+      : null
+  const injuryContextLabel = (
+    player.injury_context_used
+    && player.unavailable_teammates > 0
+  )
+    ? `${player.unavailable_teammates} teammate out`
+    : null
 
   return (
     <div className="grid grid-cols-[44px_minmax(0,1fr)_58px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-0">
@@ -118,6 +129,26 @@ function MatchupPlayer({ player }: { player: RosterProjection }) {
               }`}
             >
               {player.injury_status ?? 'Injury'}
+            </span>
+          )}
+          {fallbackLabel && (
+            <span
+              title={
+                player.projection_method === 'recent_average'
+                  ? 'Limited-history fallback projection'
+                  : 'No-history position-average projection'
+              }
+              className="ml-2 inline-flex rounded bg-amber-100 px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+            >
+              {fallbackLabel}
+            </span>
+          )}
+          {injuryContextLabel && (
+            <span
+              title="The model included unavailable-teammate opportunity context."
+              className="ml-2 inline-flex rounded bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wide text-sky-800 dark:bg-sky-950 dark:text-sky-200"
+            >
+              {injuryContextLabel}
             </span>
           )}
         </p>

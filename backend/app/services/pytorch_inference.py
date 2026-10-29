@@ -22,6 +22,10 @@ from app.services.pytorch_projection_model import (
 
 from app.services.projection_types import (
     PlayerProjectionRequest,
+    ProjectionMethod,
+)
+from app.config.model_config import (
+    TEAMMATE_INJURY_FEATURE_COLS,
 )
 
 def predict_player_projection(
@@ -38,6 +42,7 @@ def predict_player_projection(
     opponent_team: str,
     prepared_player_df: pd.DataFrame | None = None,
     prepared_matchup: dict[str, float] | None = None,
+    teammate_injury_context: dict[str, float] | None = None,
 ) -> float:
     position = checkpoint["position"]
 
@@ -62,7 +67,11 @@ def predict_player_projection(
             upcoming_week=upcoming_week,
         )
     else:
-        matchup = prepared_matchup
+        matchup = prepared_matchup.copy()
+
+    context = teammate_injury_context or {}
+    for column in TEAMMATE_INJURY_FEATURE_COLS:
+        matchup[column] = float(context.get(column, 0.0))
 
     return predict_from_raw_features(
         model=model,
@@ -174,6 +183,7 @@ class PyTorchProjectionService:
         season: int,
         upcoming_week: int,
         opponent_team: str,
+        teammate_injury_context: dict[str, float] | None = None,
     ) -> float:
         
         request = PlayerProjectionRequest(
@@ -181,6 +191,10 @@ class PyTorchProjectionService:
             season=season,
             upcoming_week=upcoming_week,
             opponent_team=opponent_team,
+            **(
+                teammate_injury_context
+                or {}
+            ),
         )
 
         return self.predict_many([request])[0]
@@ -212,16 +226,14 @@ class PyTorchProjectionService:
     
     def _get_matchup(
         self,
-        opponent_team: str,
-        season: int,
-        upcoming_week: int,
+        request: PlayerProjectionRequest,
     ) -> dict[str, float]:
-        normalized_opponent = opponent_team.upper()
+        normalized_opponent = request.opponent_team.upper()
 
         matchup_key = (
             normalized_opponent,
-            season,
-            upcoming_week,
+            request.season,
+            request.upcoming_week,
         )
 
         if matchup_key not in self.matchup_cache:
@@ -229,13 +241,17 @@ class PyTorchProjectionService:
                 build_upcoming_defense_features(
                     defense_df=self.defense_df,
                     defense_team=normalized_opponent,
-                    season=season,
+                    season=request.season,
                     position=self.position,
-                    upcoming_week=upcoming_week,
+                    upcoming_week=request.upcoming_week,
                 )
             )
 
-        return self.matchup_cache[matchup_key]
+        matchup = self.matchup_cache[matchup_key].copy()
+        for column in TEAMMATE_INJURY_FEATURE_COLS:
+            matchup[column] = float(getattr(request, column))
+
+        return matchup
 
     def predict_many(
         self,
@@ -253,9 +269,7 @@ class PyTorchProjectionService:
             )
 
             matchup = self._get_matchup(
-                opponent_team=request.opponent_team,
-                season=request.season,
-                upcoming_week=request.upcoming_week,
+                request=request,
             )
 
             histories.append(history)
@@ -304,4 +318,55 @@ class PyTorchProjectionService:
         return (
             available_games
             >= self.checkpoint["sequence_length"]
+        )
+
+    def predict_cold_start(
+        self,
+        request: PlayerProjectionRequest,
+    ) -> tuple[float, ProjectionMethod] | None:
+        history = self._get_history(
+            player_id=request.player_id,
+            season=request.season,
+            upcoming_week=request.upcoming_week,
+        )
+
+        if history:
+            recent_points = [
+                game["fantasy_points_ppr"]
+                for game in history
+            ]
+            return (
+                float(np.mean(recent_points)),
+                "recent_average",
+            )
+
+        game_is_before_prediction = (
+            (self.prepared_player_df["season"] < request.season)
+            | (
+                (
+                    self.prepared_player_df["season"]
+                    == request.season
+                )
+                & (
+                    self.prepared_player_df["week"]
+                    < request.upcoming_week
+                )
+            )
+        )
+        prior_points = (
+            self.prepared_player_df.loc[
+                game_is_before_prediction,
+                "fantasy_points_ppr",
+            ]
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
+            .astype(float)
+        )
+
+        if prior_points.empty:
+            return None
+
+        return (
+            float(prior_points.mean()),
+            "position_average",
         )

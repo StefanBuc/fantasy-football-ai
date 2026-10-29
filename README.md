@@ -1,22 +1,51 @@
 # Fantasy Football AI
 
-Fantasy Football AI is a work-in-progress application for producing weekly NFL fantasy-football projections and eventually comparing those projections with a user's ESPN fantasy team. The backend combines historical NFL data, feature engineering, position-specific machine-learning models, a FastAPI API, and an early ESPN Fantasy integration.
+Fantasy Football AI is a full-stack application that produces weekly NFL fantasy-football projections and applies them to ESPN Fantasy leagues. It combines historical NFL data, position-specific PyTorch sequence models, a FastAPI backend, ESPN roster integration, and a React/Tailwind frontend.
 
-## Project status
+The application currently supports projections for quarterbacks, running backs, wide receivers, tight ends, kickers, and D/ST.
 
-The model-training and command-line projection workflows are the most developed parts of the project. The FastAPI application and ESPN integration are under active development, and the frontend has not been implemented yet.
+## Current functionality
 
-Currently available:
+- Downloads NFL weekly statistics, snap counts, schedules, weekly rosters, depth charts, play-by-play data, and player identifiers.
+- Builds five-game player histories and pregame opponent-defense features without using the target game's results.
+- Uses separate PyTorch models and feature sets for QB, RB, WR, TE, K, and D/ST.
+- Uses chronological train, validation, and test seasons, early stopping, and MAE-based evaluation.
+- Compares model performance against last-game and rolling-mean baselines.
+- Generates batched weekly projections through a FastAPI API.
+- Connects public ESPN leagues and locally configured private ESPN leagues.
+- Maps ESPN players to NFL/GSIS identifiers and projects complete fantasy rosters.
+- Displays My Team, Matchup, and League views in a React frontend.
+- Supports benches, IR slots, ESPN team logos, future-week selection, and dark mode.
+- Applies live ESPN injury availability on top of cached base projections.
+- Produces labelled cold-start fallbacks for players with fewer than five games.
+- Builds time-safe unavailable-teammate opportunity features from injury reports.
+- Batches and caches a complete league's weekly projections for faster repeated requests.
+- Includes automated tests for temporal history, defensive features, projection construction, player matching, ESPN routes, and API contracts.
 
-- NFL weekly statistics, snap counts, schedules, and rosters through `nfl_data_py`
-- Fantasy-point and defensive-matchup feature engineering
-- Position-specific PyTorch projection models for QB, RB, WR, and TE
-- XGBoost model experiments
-- Batch projections for a selected NFL week
-- FastAPI route structure for health, metadata, players, weeks, and predictions
-- Initial ESPN Fantasy helpers for rosters, schedules, standings, transactions, and free agents
+## Architecture
 
-Several API responses are still placeholders. See [Current API](#current-api) for details.
+```text
+NFL and play-by-play data
+          |
+          v
+Feature engineering and five-game sequences
+          |
+          v
+Position-specific PyTorch models
+          |
+          v
+FastAPI projection and ESPN integration layer
+          |
+          v
+React + TypeScript + Tailwind frontend
+```
+
+The player models use two inputs:
+
+1. An LSTM processes the player's five most recent games using position-specific features.
+2. A feed-forward encoder processes the upcoming opponent's pregame defensive profile.
+
+The two representations are combined to predict fantasy points. Kicker and D/ST models use the same overall sequence architecture with special-teams-specific features.
 
 ## Repository structure
 
@@ -24,32 +53,35 @@ Several API responses are still placeholders. See [Current API](#current-api) fo
 .
 |-- backend/
 |   |-- main.py                       # FastAPI application
-|   |-- requirements.txt              # Python dependencies
+|   |-- requirements.txt              # Runtime dependencies
+|   |-- requirements-dev.txt          # Test dependencies
 |   |-- app/
-|   |   |-- config/                   # Model features and selected versions
-|   |   |-- integrations/
-|   |   |   `-- espn_fantasy.py       # ESPN Fantasy integration helpers
-|   |   |-- routes/                   # FastAPI routers
+|   |   |-- config/                   # Features, model versions, ESPN config
+|   |   |-- integrations/             # ESPN connection and player matching
+|   |   |-- routes/                   # FastAPI route modules
+|   |   |-- schemas/                  # Pydantic API contracts
 |   |   |-- scripts/                  # Training, evaluation, and projection CLIs
-|   |   `-- services/                 # Data, features, models, and inference
-|   `-- models/                       # Local trained artifacts (Git-ignored)
-`-- frontend/                         # Reserved for the future frontend
+|   |   `-- services/                 # Data, models, inference, and caching
+|   |-- models/pytorch/               # Local trained checkpoints (Git-ignored)
+|   `-- tests/                         # Backend test suite
+`-- frontend/
+    |-- src/                           # React application
+    |-- public/                        # Static assets
+    `-- package.json                   # Frontend dependencies and scripts
 ```
 
 ## Requirements
 
 - Python 3.10 or newer
-- Internet access when downloading NFL or ESPN data
-- A virtual environment is recommended
-- Trained PyTorch checkpoints are required for weekly inference
+- Node.js and npm
+- Internet access for NFL and ESPN data
+- Trained PyTorch checkpoints under `backend/models/pytorch/`
 
-The project can run on CPU. PyTorch will use CUDA when a compatible GPU and installation are available.
+The models can run on CPU. PyTorch automatically uses CUDA when a compatible GPU and PyTorch installation are available.
 
 ## Backend setup
 
-From the repository root, create and activate a virtual environment:
-
-### Windows PowerShell
+From the repository root:
 
 ```powershell
 python -m venv backend/.venv
@@ -58,164 +90,184 @@ python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 ```
 
-Then run backend commands from the `backend` directory so imports such as `app.services` resolve correctly:
+Run backend commands from the `backend` directory so imports such as `app.services` resolve correctly:
 
 ```powershell
 cd backend
-```
-
-## Run the API
-
-From `backend/`:
-
-```powershell
 python -m uvicorn main:app --reload
 ```
 
-The API is available at `http://127.0.0.1:8000`. FastAPI's interactive documentation is available at:
+The API is available at `http://127.0.0.1:8000`.
 
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
+- Health: `http://127.0.0.1:8000/api/health/`
 
-Some route modules currently download NFL data when imported, so API startup may require network access and can take time.
+The first data or projection request can take longer because NFL data and model checkpoints are loaded lazily and then reused by the backend process.
 
-## Current API
+## Frontend setup
 
-The following routers are registered in `backend/main.py`:
+In another terminal, from the repository root:
 
-| Method | Path | Status |
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Vite prints the local frontend URL when it starts. During development, the Vite proxy forwards API requests to the backend. For a separately hosted backend, copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_BASE_URL`.
+
+Useful frontend checks:
+
+```powershell
+npm run lint
+npm run build
+```
+
+## ESPN configuration
+
+The project uses the community-maintained `espn-api` package. Public leagues can be connected using their league ID and season. Private leagues require ESPN session-cookie credentials.
+
+For local private-league development, copy `backend/.env.example` to `backend/.env` and provide:
+
+```dotenv
+ESPN_LEAGUE_ID=your_league_id
+ESPN_SEASON=2026
+ESPN_SWID=your_swid_cookie
+ESPN_S2=your_espn_s2_cookie
+ESPN_ENABLE_LOCAL_API=true
+```
+
+The credential-backed `/api/espn/local/*` endpoints are hidden from the generated API schema and restricted to loopback clients. Never commit `.env`, `ESPN_SWID`, or `ESPN_S2`; these cookies should be treated like passwords.
+
+## API overview
+
+All routers are registered in `backend/main.py`.
+
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health/` | Basic process health response |
-| `GET` | `/api/health/ready` | Placeholder readiness response |
-| `GET` | `/api/metadata/` | Basic application metadata |
-| `GET` | `/api/players/` | Returns loaded weekly player records |
-| `GET` | `/api/players/{player_id}` | In progress |
-| `GET` | `/api/players/{player_id}/stats` | In progress |
-| `GET` | `/api/players/{season}/{position}` | Filters weekly records by season and position |
-| `GET` | `/api/weeks/...` | Placeholder week responses |
-| `GET` | `/api/predictions/...` | Placeholder prediction responses |
+| `GET` | `/api/health/` | Basic process health |
+| `GET` | `/api/health/ready` | Basic readiness response |
+| `GET` | `/api/metadata/` | Application metadata |
+| `GET` | `/api/players/` | Latest record for each NFL player |
+| `GET` | `/api/players/{player_id}` | Player summary |
+| `GET` | `/api/players/{player_id}/stats` | Player weekly history |
+| `GET` | `/api/players/{season}/{position}` | Players filtered by season and position |
+| `GET` | `/api/weeks/{season}` | Available regular-season weeks |
+| `GET` | `/api/weeks/{season}/{week}` | Weekly NFL schedule |
+| `GET` | `/api/predictions/week/{season}/{week}` | Weekly QB/RB/WR/TE projections |
+| `POST` | `/api/espn/connect` | Connect a public ESPN league |
+| `POST` | `/api/espn/projections` | Project a public league team |
+| `POST` | `/api/espn/matchup` | Project both sides of a matchup |
 
-An ESPN router also exists under `backend/app/routes/espn.py`, but it is not currently registered in `main.py` and still returns placeholder data.
+Local private-league equivalents are available under `/api/espn/local/*` when explicitly enabled.
 
-## Train PyTorch models
+## Training models
 
-Training downloads the requested NFL seasons, builds position-specific sequences and matchup features, and saves checkpoints under `backend/models/pytorch/`.
+Training uses the requested seasons chronologically:
 
-From `backend/`, train one position:
+- All seasons except the last two are training seasons.
+- The penultimate season is validation data used for early stopping.
+- The final season is the held-out test set.
+
+With the default 2020-2024 data, that produces training seasons 2020-2022, validation season 2023, and test season 2024.
+
+Train an offensive-position model from `backend/`:
 
 ```powershell
-python -m app.scripts.train_pytorch --position QB --season 2020 2021 2022 2023 2024 --version 4
+python -m app.scripts.train_pytorch `
+    --position QB `
+    --season 2020 2021 2022 2023 2024 `
+    --num_epochs 30 `
+    --patience 7 `
+    --version 4
 ```
 
-Train every supported position:
+Supported values are `QB`, `RB`, `WR`, `TE`, and `ALL`.
+
+Train kicker and D/ST models separately:
 
 ```powershell
-python -m app.scripts.train_pytorch --position ALL --season 2020 2021 2022 2023 2024 --version 4
+python -m app.scripts.train_special_teams `
+    --position ALL `
+    --season 2020 2021 2022 2023 2024 `
+    --version 1
 ```
 
-Useful options include:
+The selected deployed checkpoint versions are configured in `backend/app/config/model_config.py`.
 
-```text
---batch_size
---seed
---learning_rate
---num_epochs
---patience
---version
+## Evaluation and inference checks
+
+The training scripts report:
+
+- Training MAE
+- Validation MAE
+- Held-out test MAE
+- Last-game baseline MAE
+- Five-game rolling-mean baseline MAE
+
+The inference checker verifies that direct checkpoint inference, raw-feature inference, and the optimized service return matching predictions:
+
+```powershell
+python -m app.scripts.check_pytorch_inference `
+    --position QB `
+    --split test `
+    --version 4 `
+    --benchmark-size 100
 ```
 
-Model artifacts and generated caches are intentionally ignored by Git.
+## Weekly projections
 
-## Generate weekly projections
+Generate a ranked QB/RB/WR/TE slate from `backend/`:
 
-The projection command loads historical player and defense data, the active weekly roster, the schedule, and the selected position checkpoints. Players without enough prior games are skipped.
+```powershell
+python -m app.scripts.project_week `
+    --season 2024 `
+    --week 10 `
+    --position ALL `
+    --top 20
+```
+
+The full offensive-player model requires five previous games, and history can cross season boundaries. Players with one to four games receive a clearly labelled average of their available games. Players with no history receive a lower-confidence historical position average. If no prior position data exists, the player is skipped instead of fabricating a projection.
+
+## Projection performance and caching
+
+- Models and prepared NFL data are cached and reused per backend process.
+- Inference is batched by position instead of running players individually.
+- ESPN projections are generated for the whole fantasy league and cached for six hours.
+- The cache key includes a roster fingerprint, so trades, waivers, and lineup changes produce a new entry.
+- Injury status is applied after the base projection is loaded from cache. Confirmed unavailable players receive an adjusted projection of zero, while questionable and doubtful players retain their base projection with a warning.
+
+The current league cache is process-local, limited to 32 entries, and cleared on restart. A shared persistent cache is still required before horizontally scaling the API.
+
+## Tests
 
 From `backend/`:
 
 ```powershell
-python -m app.scripts.project_week --season 2024 --week 10 --position ALL --top 20
+python -m pytest tests -v
 ```
 
-Project a single position:
+The test suite covers time-aware player histories, pregame defense construction, roster and depth-chart selection, ESPN player matching, league projection caching, injury adjustment, and API response contracts.
 
-```powershell
-python -m app.scripts.project_week --season 2024 --week 10 --position WR --top 10
-```
+## Current limitations and roadmap
 
-Supported positions are `QB`, `RB`, `WR`, and `TE`. The week must be between 1 and 18.
+The next planned work is:
 
-## Check inference
+1. Train and evaluate injury-context checkpoints before promoting them to production.
+2. Replace the process-local projection cache with Redis or persistent database storage.
+3. Add an automated weekly data refresh, evaluation, projection, and optional retraining pipeline.
+4. Add production deployment configuration, meaningful readiness checks, restricted CORS, HTTPS, logging, and monitoring.
 
-The inference check compares the checkpoint, raw-feature, and optimized service prediction paths and can optionally benchmark batch inference:
-
-```powershell
-python -m app.scripts.check_pytorch_inference --position QB --split validation --version 4
-```
-
-Optional benchmark example:
-
-```powershell
-python -m app.scripts.check_pytorch_inference --position QB --split test --version 4 --benchmark-size 100
-```
-
-## ESPN Fantasy integration
-
-The project uses the community-maintained `espn-api` package. ESPN Fantasy does not provide a conventional supported OAuth flow for this use case, so private leagues require ESPN session-cookie values.
-
-Typical local environment variables are:
-
-```dotenv
-ESPN_LEAGUE_ID=your_league_id
-ESPN_YEAR=2026
-ESPN_TEAM_ID=your_team_id
-ESPN_SWID=your_swid_cookie
-ESPN_S2=your_espn_s2_cookie
-```
-
-Do not commit these values. `.env` files are ignored by the repository.
-
-The integration currently provides helpers to:
-
-- Connect to an ESPN league
-- Find a fantasy team by ESPN team ID
-- Read its roster and schedule
-- Retrieve weekly matchups
-- Retrieve league standings, transactions, and free agents
-
-Environment loading, serialization of ESPN objects, persistent synchronization, and player-ID mapping are still to be implemented. ESPN player IDs will eventually need to be mapped to the GSIS IDs used by the NFL dataset.
-
-## Data and modeling overview
-
-`NFLData` downloads and combines:
-
-- Weekly player statistics
-- Offensive snap counts
-- Player identifier mappings
-- NFL schedules
-- Weekly rosters
-
-The feature pipeline builds recent player histories and opponent defensive features. PyTorch inference selects a position-specific checkpoint, scales the input using checkpoint metadata, and produces projected PPR fantasy points. Weekly slate generation ranks eligible players by predicted points.
-
-Because external datasets and ESPN endpoints can change, data-loading and synchronization code should be treated as network-dependent.
+Additional modeling improvements include rolling-origin evaluation, formal PyTorch feature-importance analysis, uncertainty intervals, and monitoring prediction quality by position and week.
 
 ## Security notes
 
 - Never commit `.env` files, ESPN cookies, or other credentials.
 - Never log `ESPN_SWID` or `ESPN_S2`.
-- Treat ESPN cookies like passwords because they can grant access to a private league.
-- The current CORS configuration allows every origin and is intended only for development.
-- Restrict CORS and encrypt stored credentials before deploying the application.
-
-## Roadmap
-
-- Complete and validate the player, week, and prediction API routes
-- Load NFL data once during application startup instead of in route-module imports
-- Register and implement the ESPN router
-- Normalize ESPN responses into Pydantic schemas
-- Map ESPN player IDs to NFL/GSIS player IDs
-- Sync a user's roster and compare ESPN projections with model projections
-- Add automated tests and persistent storage
-- Build the frontend
+- The current wildcard CORS configuration is intended for development and must be restricted before deployment.
+- The local credential-backed ESPN API is not intended to expose one developer's cookies to public users.
+- External NFL and ESPN data sources are network-dependent and can change independently of this project.
 
 ## Disclaimer
 

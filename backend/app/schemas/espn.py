@@ -62,6 +62,14 @@ class ESPNRosterProjectionResponse(BaseModel):
     base_predicted_points: float | None
     predicted_points: float | None
     status: Literal["projected", "skipped"]
+    projection_method: Literal[
+        "model",
+        "recent_average",
+        "position_average",
+    ] | None
+    history_games: int | None
+    injury_context_used: bool
+    unavailable_teammates: int
     injury_status: str | None
     availability: Literal[
         "healthy",

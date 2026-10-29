@@ -136,6 +136,18 @@ class FakeNFLData:
 class FakeESPNProjectionService:
     def __init__(self):
         self.data = FakeNFLData()
+        self.player_df = pd.DataFrame(
+            [
+                {
+                    "player_id": "nfl-1",
+                    "season": 2023,
+                    "week": 1,
+                    "target_share": 0.2,
+                    "carries": 10.0,
+                    "offense_pct": 0.8,
+                }
+            ]
+        )
 
     def project_requests(self, position, requests):
         return ProjectionSlateResult(
@@ -214,6 +226,10 @@ def test_public_team_projection_endpoint(monkeypatch):
         "base_predicted_points": 17.25,
         "predicted_points": 17.25,
         "status": "projected",
+        "projection_method": "model",
+        "history_games": None,
+        "injury_context_used": False,
+        "unavailable_teammates": 0,
         "injury_status": None,
         "availability": "healthy",
         "adjustment_reason": None,
@@ -443,7 +459,7 @@ def test_build_matchup_response_finds_team_opponent(
     assert result.away_score == 98.25
 
 
-def test_projection_cache_reuses_base_and_refreshes_injury(
+def test_projection_cache_invalidates_when_injury_changes(
     monkeypatch,
 ):
     player = SimpleNamespace(
@@ -501,8 +517,8 @@ def test_projection_cache_reuses_base_and_refreshes_injury(
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json()["cache_hit"] is False
-    assert second.json()["cache_hit"] is True
-    assert project_calls == 1
+    assert second.json()["cache_hit"] is False
+    assert project_calls == 2
     adjusted = second.json()["players"][0]
     assert adjusted["base_predicted_points"] == 17.25
     assert adjusted["predicted_points"] == 0.0

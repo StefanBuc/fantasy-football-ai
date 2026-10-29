@@ -4,11 +4,14 @@ from app.integrations.espn_player_matching import (
     ESPNPlayerMatch,
 )
 from app.integrations.espn_roster_projection import (
+    ESPNRosterPlayer,
     build_espn_projection_request,
     build_espn_request_batches,
     project_espn_request_batches,
+    project_espn_roster,
 )
 from app.services.projection_types import (
+    PlayerProjection,
     ProjectionSlateResult,
 )
 
@@ -229,3 +232,97 @@ def test_projects_each_nonempty_position_batch_once():
     assert len(service.calls) == 1
     assert service.calls[0][0] == "QB"
     assert service.calls[0][1] == [qb_request]
+
+
+def test_live_unavailable_player_adds_team_context():
+    class CapturingService:
+        def __init__(self):
+            self.calls = []
+            self.player_df = pd.DataFrame(
+                [
+                    {
+                        "player_id": "out-wr",
+                        "season": 2024,
+                        "season_type": "REG",
+                        "week": 1,
+                        "target_share": 0.25,
+                        "carries": 1.0,
+                        "offense_pct": 0.9,
+                    }
+                ]
+            )
+
+        def project_requests(self, position, requests):
+            self.calls.extend(requests)
+            return ProjectionSlateResult(
+                projections=[
+                    PlayerProjection(
+                        request=request,
+                        position=position,
+                        predicted_points=10.0,
+                        injury_context_used=True,
+                        unavailable_teammates=int(
+                            request.teammate_out_count
+                        ),
+                    )
+                    for request in requests
+                ],
+                skipped=[],
+            )
+
+    service = CapturingService()
+    roster_players = [
+        ESPNRosterPlayer(
+            espn_id=1,
+            player_name="Out Receiver",
+            position="WR",
+            lineup_slot="WR",
+            team="BUF",
+            injury_status="OUT",
+        ),
+        ESPNRosterPlayer(
+            espn_id=2,
+            player_name="Healthy Receiver",
+            position="WR",
+            lineup_slot="WR",
+            team="BUF",
+            injury_status="ACTIVE",
+        ),
+    ]
+    id_map = pd.DataFrame(
+        [
+            {"espn_id": 1, "player_id": "out-wr", "position": "WR"},
+            {"espn_id": 2, "player_id": "healthy-wr", "position": "WR"},
+        ]
+    )
+    roster_df = pd.DataFrame(
+        [
+            {
+                "player_id": player_id,
+                "player_name": player_id,
+                "position": "WR",
+                "team": "BUF",
+            }
+            for player_id in ["out-wr", "healthy-wr"]
+        ]
+    )
+
+    project_espn_roster(
+        weekly_service=service,
+        roster_players=roster_players,
+        id_map=id_map,
+        roster_df=roster_df,
+        opponents={"BUF": "MIA"},
+        season=2024,
+        week=2,
+    )
+
+    healthy_request = next(
+        request
+        for request in service.calls
+        if request.player_id == "healthy-wr"
+    )
+    assert healthy_request.teammate_out_count == 1.0
+    assert healthy_request.teammate_out_target_share == 0.25
+    assert healthy_request.teammate_out_carries == 1.0
+    assert healthy_request.teammate_out_offense_pct == 0.9

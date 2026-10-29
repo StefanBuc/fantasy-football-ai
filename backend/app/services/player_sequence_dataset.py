@@ -6,6 +6,12 @@ from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
 
 from app.services.defense_features import build_pregame_defense_features
+from app.config.model_config import (
+    TEAMMATE_INJURY_FEATURE_COLS,
+)
+from app.services.teammate_injury_features import (
+    build_historical_team_injury_context,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -63,6 +69,8 @@ DEFENSE_FEATURE_COLS = [
 def merge_player_defense_features(
     player_df: pd.DataFrame,
     defense_df: pd.DataFrame,
+    injury_df: pd.DataFrame | None = None,
+    injury_context_player_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     player_features = player_df[PLAYER_COLS].copy()
 
@@ -80,7 +88,7 @@ def merge_player_defense_features(
         .copy()
     )
 
-    return player_features.merge(
+    combined = player_features.merge(
         defense_features,
         left_on=[
             "opponent_team",
@@ -98,9 +106,39 @@ def merge_player_defense_features(
         validate="many_to_one",
     )
 
+    injury_context = build_historical_team_injury_context(
+        player_df=(
+            injury_context_player_df
+            if injury_context_player_df is not None
+            else player_df
+        ),
+        injury_df=injury_df,
+    )
+
+    if not injury_context.empty:
+        combined = combined.merge(
+            injury_context,
+            on=["recent_team", "season", "week"],
+            how="left",
+            validate="many_to_one",
+        )
+
+    for column in TEAMMATE_INJURY_FEATURE_COLS:
+        if column not in combined.columns:
+            combined[column] = 0.0
+
+    combined[TEAMMATE_INJURY_FEATURE_COLS] = (
+        combined[TEAMMATE_INJURY_FEATURE_COLS]
+        .fillna(0.0)
+        .astype(float)
+    )
+
+    return combined
+
 def prepare_player_history_features(
     player_df: pd.DataFrame,
     defense_df: pd.DataFrame,
+    injury_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     regular_season_players = player_df[
         player_df["season_type"] == "REG"
@@ -109,6 +147,7 @@ def prepare_player_history_features(
     return merge_player_defense_features(
         regular_season_players,
         defense_df,
+        injury_df,
     )
     
 def build_player_history(
@@ -198,10 +237,19 @@ class PlayerSequenceDataset(Dataset):
         target_seasons: list[int] | None = None,
         scaler: StandardScaler | None = None,
         matchup_scaler: StandardScaler | None = None,
+        injury_df: pd.DataFrame | None = None,
+        matchup_feature_cols: list[str] | None = None,
     ):
         self.position = position
         self.feature_cols = list(feature_cols)
-        self.matchup_feature_cols = list(DEFENSE_FEATURE_COLS)
+        self.matchup_feature_cols = (
+            list(matchup_feature_cols)
+            if matchup_feature_cols is not None
+            else [
+                *DEFENSE_FEATURE_COLS,
+                *TEAMMATE_INJURY_FEATURE_COLS,
+            ]
+        )
         self.sequence_length = sequence_length
 
         self.scaler = scaler
@@ -232,6 +280,8 @@ class PlayerSequenceDataset(Dataset):
         ].copy()
 
         # Build a position-specific dataset when requested.
+        injury_context_player_df = player_df.copy()
+
         if position is not None:
             player_df = player_df[
                 player_df["position"] == position
@@ -262,6 +312,10 @@ class PlayerSequenceDataset(Dataset):
         combined_df = merge_player_defense_features(
             player_df=player_df,
             defense_df=defense_df,
+            injury_df=injury_df,
+            injury_context_player_df=(
+                injury_context_player_df
+            ),
         )
 
         # Keep the target unscaled.
@@ -402,6 +456,11 @@ class PlayerSequenceDataset(Dataset):
                     "season": int(target_row["season"]),
                     "week": int(target_row["week"]),
                     "opponent_team": target_row["opponent_team"],
+                    "team": target_row["recent_team"],
+                    **{
+                        column: float(target_row[column])
+                        for column in TEAMMATE_INJURY_FEATURE_COLS
+                    },
                 })
                 
                 start_index = (

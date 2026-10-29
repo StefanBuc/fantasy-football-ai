@@ -2,7 +2,10 @@ from bisect import bisect_left
 
 import numpy as np
 
-from app.services.projection_types import PlayerProjectionRequest
+from app.services.projection_types import (
+    PlayerProjectionRequest,
+    ProjectionMethod,
+)
 from app.services.pytorch_projection_model import (
     load_selected_projection_checkpoint,
     predict_batch_from_raw_features,
@@ -187,4 +190,48 @@ class SpecialTeamsProjectionService:
             device=self.device,
             histories=[self._get_history(request) for request in requests],
             matchups=[self._get_matchup(request) for request in requests],
+        )
+
+    def predict_cold_start(
+        self,
+        request: PlayerProjectionRequest,
+    ) -> tuple[float, ProjectionMethod] | None:
+        history = self._get_history(request)
+
+        if history:
+            recent_points = [
+                game["fantasy_points"]
+                for game in history
+            ]
+            return (
+                float(np.mean(recent_points)),
+                "recent_average",
+            )
+
+        game_is_before_prediction = (
+            (self.weekly_df["season"] < request.season)
+            | (
+                (self.weekly_df["season"] == request.season)
+                & (
+                    self.weekly_df["week"]
+                    < request.upcoming_week
+                )
+            )
+        )
+        prior_points = (
+            self.weekly_df.loc[
+                game_is_before_prediction,
+                "fantasy_points",
+            ]
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
+            .astype(float)
+        )
+
+        if prior_points.empty:
+            return None
+
+        return (
+            float(prior_points.mean()),
+            "position_average",
         )
