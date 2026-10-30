@@ -111,12 +111,20 @@ class FakeNFLData:
                     "player_name": "T.Player",
                     "position": "RB",
                     "team": "ATL",
+                },
+                {
+                    "player_id": "nfl-2",
+                    "player_name": "A.Receiver",
+                    "position": "WR",
+                    "team": "BUF",
                 }
             ]
         )
 
     def get_week_opponents(self, season, week):
-        return {"ATL": "TB"}
+        return {
+            "ATL": "TB",
+        }
 
     def get_projection_roster(self, season, week):
         return self.get_week_roster(season, week), week
@@ -128,7 +136,23 @@ class FakeNFLData:
                     "espn_id": 501,
                     "player_id": "nfl-1",
                     "position": "RB",
+                },
+                {
+                    "espn_id": 502,
+                    "player_id": "nfl-2",
+                    "position": "WR",
                 }
+            ]
+        )
+
+    def get_week_depth_chart(self, season, week):
+        return pd.DataFrame(
+            columns=[
+                "player_id",
+                "team",
+                "position",
+                "depth_position",
+                "depth_team",
             ]
         )
 
@@ -230,11 +254,72 @@ def test_public_team_projection_endpoint(monkeypatch):
         "history_games": None,
         "injury_context_used": False,
         "unavailable_teammates": 0,
+        "is_on_bye": False,
         "injury_status": None,
         "availability": "healthy",
         "adjustment_reason": None,
         "reason": None,
     }
+
+
+def test_team_projection_marks_player_on_bye(monkeypatch):
+    fake_league = SimpleNamespace(
+        settings=SimpleNamespace(name="Test League"),
+        teams=[
+            SimpleNamespace(
+                team_id=1,
+                team_name="Toronto Touchdowns",
+                team_abbrev="TOR",
+                logo_url="",
+                roster=[
+                    SimpleNamespace(
+                        playerId=501,
+                        name="Test Player",
+                        position="RB",
+                        lineupSlot="RB",
+                        proTeam="ATL",
+                        injuryStatus="ACTIVE",
+                    )
+                ],
+            )
+        ],
+    )
+    service = FakeESPNProjectionService()
+    service.data.get_week_opponents = lambda season, week: {
+        "BUF": "MIA",
+        "MIA": "BUF",
+    }
+
+    monkeypatch.setattr(
+        espn_route,
+        "get_public_league",
+        lambda league_id, season: fake_league,
+    )
+    monkeypatch.setattr(
+        espn_route,
+        "get_espn_projection_service",
+        lambda season: service,
+    )
+    espn_route.projection_cache.clear()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/espn/projections",
+        json={
+            "league_id": 123,
+            "season": 2024,
+            "team_id": 1,
+            "week": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    player = response.json()["players"][0]
+    assert player["is_on_bye"] is True
+    assert player["predicted_points"] == 0.0
+    assert player["adjustment_reason"] == (
+        "ATL is on bye in week 3."
+    )
 
 
 def make_private_league():
@@ -524,3 +609,91 @@ def test_projection_cache_invalidates_when_injury_changes(
     assert adjusted["predicted_points"] == 0.0
     assert adjusted["injury_status"] == "OUT"
     assert adjusted["availability"] == "unavailable"
+
+
+def test_league_players_include_rostered_and_available(
+    monkeypatch,
+):
+    rostered_player = SimpleNamespace(
+        playerId=501,
+        name="Rostered Runner",
+        position="RB",
+        lineupSlot="RB",
+        proTeam="ATL",
+        injuryStatus="ACTIVE",
+        percent_owned=96.5,
+        percent_started=70.0,
+        avg_points=14.75,
+    )
+    available_player = SimpleNamespace(
+        playerId=502,
+        name="Available Receiver",
+        position="WR",
+        lineupSlot="FA",
+        proTeam="BUF",
+        injuryStatus="QUESTIONABLE",
+        percent_owned=12.25,
+        percent_started=1.5,
+        avg_points=8.5,
+    )
+    fantasy_team = SimpleNamespace(
+        team_id=1,
+        team_name="Toronto Touchdowns",
+        roster=[rostered_player],
+    )
+    fake_league = SimpleNamespace(
+        teams=[fantasy_team],
+        free_agents=lambda week, size: [
+            rostered_player,
+            available_player,
+        ],
+    )
+
+    monkeypatch.setattr(
+        espn_route,
+        "get_public_league",
+        lambda league_id, season: fake_league,
+    )
+    monkeypatch.setattr(
+        espn_route,
+        "get_espn_projection_service",
+        lambda season: FakeESPNProjectionService(),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/espn/players",
+        json={
+            "league_id": 123,
+            "season": 2024,
+            "week": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["player_count"] == 2
+    assert body["available_count"] == 1
+    assert body["rostered_count"] == 1
+    assert body["roster_week"] == 3
+
+    players = {
+        player["espn_id"]: player
+        for player in body["players"]
+    }
+    assert players[501]["roster_status"] == "rostered"
+    assert players[501]["fantasy_team_name"] == (
+        "Toronto Touchdowns"
+    )
+    assert players[501]["is_on_bye"] is False
+    assert players[502]["roster_status"] == "available"
+    assert players[502]["fantasy_team_name"] is None
+    assert players[502]["availability"] == "questionable"
+    assert players[502]["season_average"] == 8.5
+    assert players[502]["opponent_team"] is None
+    assert players[502]["predicted_points"] == 0.0
+    assert players[502]["projection_status"] == "skipped"
+    assert players[502]["is_on_bye"] is True
+    assert players[502]["projection_reason"] == (
+        "BUF is on bye in week 3."
+    )

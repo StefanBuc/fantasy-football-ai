@@ -51,6 +51,63 @@ class ESPNLocalTeamProjectionRequest(BaseModel):
     week: int = Field(ge=1, le=18)
 
 
+class ESPNLeaguePlayersRequest(BaseModel):
+    league_id: int = Field(gt=0)
+    season: int = Field(
+        ge=2018,
+        le=date.today().year,
+    )
+    week: int = Field(ge=1, le=18)
+
+
+class ESPNLocalLeaguePlayersRequest(BaseModel):
+    week: int = Field(ge=1, le=18)
+
+
+class ESPNLeaguePlayerResponse(BaseModel):
+    espn_id: int
+    player_name: str
+    position: str
+    team: str | None
+    roster_status: Literal["available", "rostered"]
+    fantasy_team_id: int | None
+    fantasy_team_name: str | None
+    percent_owned: float | None
+    percent_started: float | None
+    season_average: float | None
+    opponent_team: str | None
+    base_predicted_points: float | None
+    predicted_points: float | None
+    projection_status: Literal["projected", "skipped"]
+    projection_method: Literal[
+        "model",
+        "recent_average",
+        "position_average",
+    ] | None
+    history_games: int | None
+    projection_reason: str | None
+    is_on_bye: bool
+    injury_status: str | None
+    availability: Literal[
+        "healthy",
+        "questionable",
+        "doubtful",
+        "unavailable",
+        "unknown",
+    ]
+
+
+class ESPNLeaguePlayersResponse(BaseModel):
+    league_id: int
+    season: int
+    week: int
+    roster_week: int
+    player_count: int
+    available_count: int
+    rostered_count: int
+    players: list[ESPNLeaguePlayerResponse]
+
+
 class ESPNRosterProjectionResponse(BaseModel):
     espn_id: int
     player_id: str | None
@@ -70,6 +127,7 @@ class ESPNRosterProjectionResponse(BaseModel):
     history_games: int | None
     injury_context_used: bool
     unavailable_teammates: int
+    is_on_bye: bool
     injury_status: str | None
     availability: Literal[
         "healthy",

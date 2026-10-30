@@ -12,6 +12,9 @@ from app.services.projection_types import (
     ProjectionMethod,
     ProjectionSlateResult,
 )
+from app.services.projection_slate import (
+    build_projection_requests,
+)
 from app.config.model_config import (
     TEAMMATE_INJURY_FEATURE_COLS,
 )
@@ -41,6 +44,13 @@ SUPPORTED_POSITIONS = {
     "DST",
 }
 
+NFL_TEAM_CODES = {
+    "ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE",
+    "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC",
+    "LA", "LAC", "LV", "MIA", "MIN", "NE", "NO", "NYG",
+    "NYJ", "PHI", "PIT", "SEA", "SF", "TB", "TEN", "WAS",
+}
+
 
 @dataclass(frozen=True)
 class ESPNRosterProjection:
@@ -57,6 +67,7 @@ class ESPNRosterProjection:
     history_games: int | None = None
     injury_context_used: bool = False
     unavailable_teammates: int = 0
+    is_on_bye: bool = False
     reason: str | None = None
 
 
@@ -68,6 +79,7 @@ class ESPNRosterPlayer:
     lineup_slot: str
     team: str | None = None
     injury_status: str | None = None
+    espn_projected_points: float | None = None
 
 
 def build_espn_projection_request(
@@ -262,6 +274,8 @@ def project_espn_roster(
     opponents: dict[str, str],
     season: int,
     week: int,
+    depth_chart_df: pd.DataFrame | None = None,
+    use_espn_qb_starter_signal: bool = False,
 ) -> list[ESPNRosterProjection]:
     player_matches = []
 
@@ -337,6 +351,146 @@ def project_espn_roster(
                 position=model_position,
             )
         )
+
+    inactive_qb_espn_ids: set[int] = set()
+    player_teams = {
+        str(row.player_id): str(row.team).upper()
+        for row in roster_df[
+            ["player_id", "team"]
+        ].itertuples(index=False)
+    }
+    qb_depth_teams: set[str] = set()
+
+    def mark_inactive_qb(
+        index: int,
+        player_match: ESPNPlayerMatch,
+        team: str,
+    ) -> None:
+        inactive_qb_espn_ids.add(
+            roster_players[index].espn_id
+        )
+        player_matches[index] = replace(
+            player_match,
+            status="missing",
+            reason=(
+                "Player is not the active starting "
+                f"quarterback for {team} in week {week}."
+            ),
+        )
+
+    if depth_chart_df is not None and not depth_chart_df.empty:
+        unavailable_player_ids = {
+            player_match.player_id
+            for roster_player, player_match in zip(
+                roster_players,
+                player_matches,
+            )
+            if (
+                player_match.player_id is not None
+                and roster_player.position == "QB"
+                and is_unavailable_injury_status(
+                    roster_player.injury_status
+                )
+            )
+        }
+        eligible_roster_df = roster_df[
+            ~roster_df["player_id"].isin(
+                unavailable_player_ids
+            )
+        ].copy()
+        depth_check_opponents = {
+            str(team).upper(): opponents.get(
+                str(team).upper(),
+                "DEPTH_CHECK",
+            )
+            for team in eligible_roster_df["team"].unique()
+        }
+        active_qb_ids = {
+            request.player_id
+            for request in build_projection_requests(
+                roster_df=eligible_roster_df,
+                opponents=depth_check_opponents,
+                position="QB",
+                depth_chart_df=depth_chart_df,
+            )
+        }
+        qb_depth_teams = {
+            str(team).upper()
+            for team in depth_chart_df.loc[
+                depth_chart_df["position"] == "QB",
+                "team",
+            ]
+        }
+        for index, (roster_player, player_match) in enumerate(
+            zip(roster_players, player_matches)
+        ):
+            player_id = player_match.player_id
+            team = (
+                player_teams.get(player_id)
+                if player_id is not None
+                else None
+            )
+            if (
+                roster_player.position == "QB"
+                and player_match.status == "matched"
+                and player_id not in active_qb_ids
+                and team in qb_depth_teams
+            ):
+                mark_inactive_qb(
+                    index=index,
+                    player_match=player_match,
+                    team=team,
+                )
+
+    if use_espn_qb_starter_signal:
+        qb_candidates_by_team: dict[
+            str,
+            list[tuple[int, ESPNPlayerMatch, float]],
+        ] = {}
+
+        for index, (roster_player, player_match) in enumerate(
+            zip(roster_players, player_matches)
+        ):
+            player_id = player_match.player_id
+            team = (
+                player_teams.get(player_id)
+                if player_id is not None
+                else None
+            )
+            espn_projection = (
+                roster_player.espn_projected_points
+            )
+            if (
+                roster_player.position != "QB"
+                or player_match.status != "matched"
+                or team is None
+                or team in qb_depth_teams
+                or espn_projection is None
+            ):
+                continue
+
+            qb_candidates_by_team.setdefault(
+                team,
+                [],
+            ).append(
+                (index, player_match, espn_projection)
+            )
+
+        for team, candidates in qb_candidates_by_team.items():
+            starter = max(
+                candidates,
+                key=lambda candidate: candidate[2],
+            )
+            if starter[2] <= 0:
+                continue
+
+            for index, player_match, _ in candidates:
+                if index != starter[0]:
+                    mark_inactive_qb(
+                        index=index,
+                        player_match=player_match,
+                        team=team,
+                    )
 
     requests_by_position, request_skips = (
         build_espn_request_batches(
@@ -443,6 +597,29 @@ def project_espn_roster(
             else None
         )
 
+        is_inactive_qb = (
+            roster_player.espn_id
+            in inactive_qb_espn_ids
+        )
+        if is_inactive_qb:
+            predicted_points = 0.0
+
+        resolved_team = (
+            request.team
+            if request is not None
+            else roster_player.team
+        )
+        opponent_team = (
+            request.opponent_team
+            if request is not None
+            else opponents.get(resolved_team or "")
+        )
+        is_on_bye = (
+            bool(opponents)
+            and resolved_team in NFL_TEAM_CODES
+            and resolved_team not in opponents
+        )
+
         reason = player_match.reason
 
         if reason is None:
@@ -458,6 +635,12 @@ def project_espn_roster(
         if predicted_points is None and reason is None:
             reason = "No projection result was produced."
 
+        if is_on_bye:
+            predicted_points = 0.0
+            reason = (
+                f"{resolved_team} is on bye in week {week}."
+            )
+
         projections.append(
             ESPNRosterProjection(
                 espn_id=roster_player.espn_id,
@@ -465,20 +648,15 @@ def project_espn_roster(
                 player_name=roster_player.player_name,
                 position=roster_player.position,
                 lineup_slot=roster_player.lineup_slot,
-                team=(
-                    request.team
-                    if request is not None
-                    else None
-                ),
-                opponent_team=(
-                    request.opponent_team
-                    if request is not None
-                    else None
-                ),
+                team=resolved_team,
+                opponent_team=opponent_team,
                 predicted_points=predicted_points,
                 status=(
                     "projected"
-                    if predicted_points is not None
+                    if (
+                        player_projection is not None
+                        and not is_inactive_qb
+                    )
                     else "skipped"
                 ),
                 projection_method=(
@@ -501,6 +679,7 @@ def project_espn_roster(
                     if player_projection is not None
                     else 0
                 ),
+                is_on_bye=is_on_bye,
                 reason=reason,
             )
         )

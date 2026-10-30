@@ -448,6 +448,119 @@ class NFLData:
                 "Call load_depth_charts() first."
             )
 
+        output_columns = [
+            "player_id",
+            "team",
+            "position",
+            "depth_position",
+            "depth_team",
+        ]
+
+        if self.depth_charts.empty:
+            return pd.DataFrame(columns=output_columns)
+
+        current_depth_columns = {
+            "dt",
+            "team",
+            "gsis_id",
+            "pos_grp",
+            "pos_abb",
+            "pos_slot",
+            "pos_rank",
+        }
+        if current_depth_columns.issubset(
+            self.depth_charts.columns
+        ):
+            depth_chart = self.depth_charts.copy()
+            depth_chart["snapshot_at"] = pd.to_datetime(
+                depth_chart["dt"],
+                utc=True,
+                errors="coerce",
+            )
+
+            games = (
+                self.get_week_schedule(season, week)
+                if self.schedule is not None
+                else pd.DataFrame()
+            )
+            cutoff = None
+            if not games.empty and "gameday" in games.columns:
+                game_dates = pd.to_datetime(
+                    games["gameday"],
+                    utc=True,
+                    errors="coerce",
+                ).dropna()
+                if not game_dates.empty:
+                    cutoff = (
+                        game_dates.min()
+                        + pd.Timedelta(days=1)
+                    )
+
+            if cutoff is not None:
+                depth_chart = depth_chart[
+                    depth_chart["snapshot_at"] <= cutoff
+                ].copy()
+
+            depth_chart = depth_chart[
+                (depth_chart["pos_grp"] == "3WR 1TE")
+                & depth_chart["pos_abb"].isin(
+                    ["QB", "RB", "WR", "TE"]
+                )
+                & depth_chart["gsis_id"].notna()
+                & depth_chart["snapshot_at"].notna()
+            ].copy()
+
+            if depth_chart.empty:
+                return pd.DataFrame(columns=output_columns)
+
+            latest_snapshot = depth_chart[
+                "snapshot_at"
+            ].max()
+            if (
+                cutoff is not None
+                and cutoff - latest_snapshot
+                > pd.Timedelta(days=21)
+            ):
+                return pd.DataFrame(columns=output_columns)
+
+            latest_by_team = depth_chart.groupby(
+                "team"
+            )["snapshot_at"].transform("max")
+            depth_chart = depth_chart[
+                depth_chart["snapshot_at"]
+                == latest_by_team
+            ].copy()
+            depth_chart["position"] = (
+                depth_chart["pos_abb"].astype(str)
+            )
+            depth_chart["depth_position"] = (
+                depth_chart["position"]
+                + ":"
+                + depth_chart["pos_slot"].astype(str)
+            )
+            depth_chart["depth_team"] = pd.to_numeric(
+                depth_chart["pos_rank"],
+                errors="coerce",
+            )
+            depth_chart = depth_chart.dropna(
+                subset=["depth_team"]
+            )
+            depth_chart = depth_chart.rename(
+                columns={"gsis_id": "player_id"}
+            )
+            depth_chart = (
+                depth_chart
+                .sort_values("depth_team")
+                .drop_duplicates(
+                    subset=["player_id"],
+                    keep="first",
+                )
+            )
+
+            return depth_chart[
+                output_columns
+            ].reset_index(drop=True)
+
         required_columns = {
             "season",
             "week",
@@ -518,13 +631,7 @@ class NFLData:
         )
 
         return depth_chart[
-            [
-                "player_id",
-                "team",
-                "position",
-                "depth_position",
-                "depth_team",
-            ]
+            output_columns
         ].reset_index(drop=True)
     
     def get_player_id_map(self) -> pd.DataFrame:

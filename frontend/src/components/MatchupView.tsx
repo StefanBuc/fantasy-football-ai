@@ -117,6 +117,11 @@ function MatchupPlayer({ player }: { player: RosterProjection }) {
       <div className="min-w-0">
         <p className="truncate text-sm font-bold text-slate-900">
           {player.player_name}
+          {player.is_on_bye && (
+            <span className="ml-2 inline-flex rounded bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wide text-sky-800 dark:bg-sky-950 dark:text-sky-200">
+              BYE
+            </span>
+          )}
           {showInjury && (
             <span
               title={player.adjustment_reason ?? undefined}
@@ -154,7 +159,11 @@ function MatchupPlayer({ player }: { player: RosterProjection }) {
         </p>
         <p className="mt-0.5 text-xs text-slate-500">
           {player.position} · {player.team ?? '—'}
-          {player.opponent_team ? ` vs ${player.opponent_team}` : ''}
+          {player.is_on_bye
+            ? ' · BYE'
+            : player.opponent_team
+              ? ` vs ${player.opponent_team}`
+              : ''}
         </p>
       </div>
       <p className="text-right text-lg font-black tabular-nums text-slate-950">

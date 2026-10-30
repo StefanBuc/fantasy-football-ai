@@ -13,10 +13,11 @@ import type {
 } from '../types/api'
 import { LeagueStandings } from './LeagueStandings'
 import { MatchupView } from './MatchupView'
+import { PlayersView } from './PlayersView'
 import { ThemeToggle } from './ThemeToggle'
 
 export type ConnectionMode = 'public' | 'local'
-type DashboardView = 'team' | 'matchup' | 'league'
+type DashboardView = 'team' | 'matchup' | 'players' | 'league'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
@@ -49,6 +50,10 @@ const availabilityStyles: Record<
 }
 
 function playerStatusLabel(player: RosterProjection): string {
+  if (player.is_on_bye) {
+    return 'BYE'
+  }
+
   if (player.availability !== 'healthy') {
     return player.injury_status ?? 'Injury update'
   }
@@ -150,8 +155,10 @@ function PlayerRow({ player }: { player: RosterProjection }) {
   const positionClass =
     positionStyles[player.position]
     ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100'
-  const statusClass = player.availability !== 'healthy'
-    ? availabilityStyles[player.availability]
+  const statusClass = player.is_on_bye
+    ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200'
+    : player.availability !== 'healthy'
+      ? availabilityStyles[player.availability]
     : (
       player.projection_method !== 'model'
       || (
@@ -191,8 +198,12 @@ function PlayerRow({ player }: { player: RosterProjection }) {
         </div>
       </div>
 
-      <p className="text-right text-xs font-bold text-slate-600 dark:text-slate-200 sm:text-left sm:text-sm">
-        {player.opponent_team ? `vs ${player.opponent_team}` : '—'}
+      <p className={`text-right text-xs font-bold sm:text-left sm:text-sm ${player.is_on_bye ? 'text-sky-700 dark:text-sky-300' : 'text-slate-600 dark:text-slate-200'}`}>
+        {player.is_on_bye
+          ? 'BYE'
+          : player.opponent_team
+            ? `vs ${player.opponent_team}`
+            : '—'}
       </p>
 
       <div className="hidden sm:block">
@@ -220,7 +231,9 @@ function PlayerRow({ player }: { player: RosterProjection }) {
         <p className="truncate pr-4 text-xs text-slate-400">
           {player.adjustment_reason
             ?? projectionMethodDescription(player)
-            ?? (player.availability !== 'healthy'
+            ?? (player.is_on_bye
+              ? 'No game scheduled this week.'
+              : player.availability !== 'healthy'
               ? playerStatusLabel(player)
               : player.status === 'skipped'
                 ? player.reason
@@ -409,6 +422,7 @@ export function LeagueDashboard({
           {([
             ['team', 'My team'],
             ['matchup', 'Matchup'],
+            ['players', 'Players'],
             ['league', 'League'],
           ] as const).map(([view, label]) => (
             <button
@@ -576,6 +590,15 @@ export function LeagueDashboard({
             league={league}
             selectedTeamId={selectedTeamId}
             connectionMode={connectionMode}
+          />
+        )}
+
+        {activeView === 'players' && (
+          <PlayersView
+            league={league}
+            connectionMode={connectionMode}
+            week={week}
+            onWeekChange={changeWeek}
           />
         )}
       </main>

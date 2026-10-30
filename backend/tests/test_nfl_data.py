@@ -84,3 +84,78 @@ def test_projection_roster_uses_latest_available_week():
     assert roster["player_id"].tolist() == [
         "player-1"
     ]
+
+
+def test_empty_depth_chart_returns_standard_columns():
+    data = NFLData([2026])
+    data.depth_charts = pd.DataFrame()
+
+    depth_chart = data.get_week_depth_chart(
+        season=2026,
+        week=1,
+    )
+
+    assert depth_chart.empty
+    assert depth_chart.columns.tolist() == [
+        "player_id",
+        "team",
+        "position",
+        "depth_position",
+        "depth_team",
+    ]
+
+
+def test_current_depth_chart_schema_maps_qb_ranks():
+    data = NFLData([2025])
+    data.schedule = pd.DataFrame(
+        [
+            {
+                "season": 2025,
+                "week": 1,
+                "game_type": "REG",
+                "home_team": "BUF",
+                "away_team": "BAL",
+                "gameday": "2025-09-07",
+            }
+        ]
+    )
+    data.depth_charts = pd.DataFrame(
+        [
+            {
+                "dt": "2025-09-05T12:00:00Z",
+                "team": "BUF",
+                "gsis_id": "qb-1",
+                "pos_grp": "3WR 1TE",
+                "pos_abb": "QB",
+                "pos_slot": 9,
+                "pos_rank": 1,
+            },
+            {
+                "dt": "2025-09-05T12:00:00Z",
+                "team": "BUF",
+                "gsis_id": "qb-2",
+                "pos_grp": "3WR 1TE",
+                "pos_abb": "QB",
+                "pos_slot": 9,
+                "pos_rank": 2,
+            },
+        ]
+    )
+
+    depth_chart = data.get_week_depth_chart(
+        season=2025,
+        week=1,
+    )
+
+    assert depth_chart["player_id"].tolist() == [
+        "qb-1",
+        "qb-2",
+    ]
+    assert depth_chart["position"].tolist() == [
+        "QB",
+        "QB",
+    ]
+    assert depth_chart["depth_team"].tolist() == [
+        1,
+        2,
+    ]

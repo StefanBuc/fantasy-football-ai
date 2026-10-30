@@ -72,7 +72,7 @@ The two representations are combined to predict fantasy points. Kicker and D/ST 
 
 ## Requirements
 
-- Python 3.10 or newer
+- Python 3.10-3.11 (Python 3.11 is recommended)
 - Node.js and npm
 - Internet access for NFL and ESPN data
 - Trained PyTorch checkpoints under `backend/models/pytorch/`
@@ -84,11 +84,25 @@ The models can run on CPU. PyTorch automatically uses CUDA when a compatible GPU
 From the repository root:
 
 ```powershell
-python -m venv backend/.venv
-backend/.venv/Scripts/Activate.ps1
+py -3.11 -m venv backend\.venv
+backend\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 ```
+
+The pinned NumPy and pandas versions have prebuilt Windows wheels through Python
+3.11. Using Python 3.12 or newer can make `pip` try to compile pandas locally,
+which requires a C/C++ build toolchain. If a previous virtual environment was created
+with another Python version, deactivate it and recreate it before installing:
+
+```powershell
+deactivate
+Remove-Item -Recurse -Force backend\.venv
+```
+
+Install the PyTorch build appropriate for the laptop after installing the other
+requirements. Choose the CPU or CUDA command from the official
+[PyTorch installation selector](https://pytorch.org/get-started/locally/).
 
 Run backend commands from the `backend` directory so imports such as `app.services` resolve correctly:
 

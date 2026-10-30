@@ -8,6 +8,7 @@ from typing import Callable
 from app.integrations.espn_roster_projection import (
     ESPNRosterPlayer,
     ESPNRosterProjection,
+    NFL_TEAM_CODES,
     project_espn_roster,
 )
 from app.services.weekly_projection_service import (
@@ -109,21 +110,51 @@ def roster_fingerprint(league) -> str:
 def make_roster_player(
     player,
     normalize_team: Callable[[str], str],
+    week: int | None = None,
 ) -> ESPNRosterPlayer:
     pro_team = getattr(player, "proTeam", None)
+    normalized_team = (
+        normalize_team(str(pro_team))
+        if pro_team
+        else None
+    )
+    espn_projected_points = getattr(
+        player,
+        "projected_points",
+        None,
+    )
+    if espn_projected_points is None and week is not None:
+        player_stats = getattr(player, "stats", {})
+        espn_projected_points = player_stats.get(
+            week,
+            {},
+        ).get("projected_points")
+
+    try:
+        normalized_espn_projection = (
+            float(espn_projected_points)
+            if espn_projected_points is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        normalized_espn_projection = None
+
     return ESPNRosterPlayer(
         espn_id=int(player.playerId),
         player_name=str(player.name),
         position=str(player.position).upper(),
         lineup_slot=str(player.lineupSlot),
         team=(
-            normalize_team(str(pro_team))
-            if pro_team
+            normalized_team
+            if normalized_team in NFL_TEAM_CODES
             else None
         ),
         injury_status=(
             str(getattr(player, "injuryStatus", ""))
             or None
+        ),
+        espn_projected_points=(
+            normalized_espn_projection
         ),
     )
 
@@ -149,7 +180,11 @@ def build_league_week_projection(
 
     roster_by_team = {
         int(team.team_id): [
-            make_roster_player(player, normalize_team)
+            make_roster_player(
+                player,
+                normalize_team,
+                week=week,
+            )
             for player in team.roster
         ]
         for team in league.teams
@@ -168,6 +203,10 @@ def build_league_week_projection(
         opponents=opponents,
         season=season,
         week=week,
+        depth_chart_df=service.data.get_week_depth_chart(
+            season=season,
+            week=week,
+        ),
     )
 
     team_projections: dict[

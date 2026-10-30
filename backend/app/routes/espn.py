@@ -16,9 +16,16 @@ from app.config.espn_config import (
     local_espn_api_enabled,
 )
 from app.integrations.espn_fantasy import get_league
+from app.integrations.espn_roster_projection import (
+    project_espn_roster,
+)
 from app.schemas.espn import (
     ESPNLeagueConnectRequest,
     ESPNLeagueConnectResponse,
+    ESPNLeaguePlayerResponse,
+    ESPNLeaguePlayersRequest,
+    ESPNLeaguePlayersResponse,
+    ESPNLocalLeaguePlayersRequest,
     ESPNLocalTeamProjectionRequest,
     ESPNMatchupResponse,
     ESPNRosterProjectionResponse,
@@ -32,6 +39,7 @@ from app.services.weekly_projection_service import (
 from app.services.espn_projection_cache import (
     ESPNProjectionCache,
     build_league_week_projection,
+    make_roster_player,
     roster_fingerprint,
 )
 from app.services.teammate_injury_features import (
@@ -54,6 +62,22 @@ ESPN_TEAM_ALIASES = {
 }
 
 projection_cache = ESPNProjectionCache()
+
+PLAYER_POOL_POSITIONS = {
+    "QB",
+    "RB",
+    "WR",
+    "TE",
+    "K",
+    "D/ST",
+}
+
+PLAYER_POOL_POSITION_ORDER = {
+    position: index
+    for index, position in enumerate(
+        ("QB", "RB", "WR", "TE", "D/ST", "K")
+    )
+}
 
 
 def normalize_espn_team(team: str) -> str:
@@ -86,6 +110,248 @@ def classify_availability(
     if is_unavailable_injury_status(injury_status):
         return "unavailable"
     return "unknown"
+
+
+def optional_percentage(value: Any) -> float | None:
+    try:
+        percentage = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    return percentage if percentage >= 0 else None
+
+
+def optional_number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def player_pro_team(player) -> str | None:
+    raw_team = getattr(player, "proTeam", None)
+    if raw_team is None:
+        return None
+
+    team = str(raw_team).strip().upper()
+    if team in {"", "0", "FA", "NONE"}:
+        return None
+
+    return normalize_espn_team(team)
+
+
+def build_league_player(
+    player,
+    roster_status: Literal["available", "rostered"],
+    fantasy_team_id: int | None = None,
+    fantasy_team_name: str | None = None,
+) -> ESPNLeaguePlayerResponse | None:
+    position = str(
+        getattr(player, "position", "")
+    ).upper()
+    if position not in PLAYER_POOL_POSITIONS:
+        return None
+
+    injury_status = normalize_injury_status(
+        getattr(player, "injuryStatus", None)
+    )
+
+    return ESPNLeaguePlayerResponse(
+        espn_id=int(player.playerId),
+        player_name=str(player.name),
+        position=position,
+        team=player_pro_team(player),
+        roster_status=roster_status,
+        fantasy_team_id=fantasy_team_id,
+        fantasy_team_name=fantasy_team_name,
+        percent_owned=optional_percentage(
+            getattr(player, "percent_owned", None)
+        ),
+        percent_started=optional_percentage(
+            getattr(player, "percent_started", None)
+        ),
+        season_average=optional_number(
+            getattr(player, "avg_points", None)
+        ),
+        opponent_team=None,
+        base_predicted_points=None,
+        predicted_points=None,
+        projection_status="skipped",
+        projection_method=None,
+        history_games=None,
+        projection_reason="Projection has not been calculated.",
+        is_on_bye=False,
+        injury_status=injury_status,
+        availability=classify_availability(injury_status),
+    )
+
+
+def build_league_players_response(
+    league,
+    league_id: int,
+    season: int,
+    week: int,
+) -> ESPNLeaguePlayersResponse:
+    players_by_id: dict[int, ESPNLeaguePlayerResponse] = {}
+    player_sources_by_id: dict[int, Any] = {}
+
+    for fantasy_team in league.teams:
+        fantasy_team_id = int(fantasy_team.team_id)
+        fantasy_team_name = str(fantasy_team.team_name)
+
+        for player in fantasy_team.roster:
+            league_player = build_league_player(
+                player=player,
+                roster_status="rostered",
+                fantasy_team_id=fantasy_team_id,
+                fantasy_team_name=fantasy_team_name,
+            )
+            if league_player is not None:
+                players_by_id[league_player.espn_id] = (
+                    league_player
+                )
+                player_sources_by_id[league_player.espn_id] = (
+                    player
+                )
+
+    try:
+        free_agents = league.free_agents(
+            week=week,
+            size=1000,
+        )
+    except ESPNAccessDenied as error:
+        raise HTTPException(
+            status_code=403,
+            detail="ESPN denied access to the player pool.",
+        ) from error
+    except ESPNUnknownError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="ESPN could not return the player pool.",
+        ) from error
+
+    for player in free_agents:
+        league_player = build_league_player(
+            player=player,
+            roster_status="available",
+        )
+        if (
+            league_player is not None
+            and league_player.espn_id not in players_by_id
+        ):
+            players_by_id[league_player.espn_id] = league_player
+            player_sources_by_id[league_player.espn_id] = player
+
+    service = get_espn_projection_service(season)
+    roster_df, roster_week = (
+        service.data.get_projection_roster(
+            season=season,
+            week=week,
+        )
+    )
+    opponents = service.data.get_week_opponents(
+        season=season,
+        week=week,
+    )
+    id_map = service.data.get_player_id_map()
+
+    roster_players = [
+        make_roster_player(
+            player=player_sources_by_id[espn_id],
+            normalize_team=normalize_espn_team,
+            week=week,
+        )
+        for espn_id in players_by_id
+    ]
+    pool_projections = project_espn_roster(
+        weekly_service=service,
+        roster_players=roster_players,
+        id_map=id_map,
+        roster_df=roster_df,
+        opponents=opponents,
+        season=season,
+        week=week,
+        depth_chart_df=service.data.get_week_depth_chart(
+            season=season,
+            week=week,
+        ),
+        use_espn_qb_starter_signal=True,
+    )
+    projections_by_id = {
+        projection.espn_id: projection
+        for projection in pool_projections
+    }
+
+    for espn_id, player in tuple(players_by_id.items()):
+        projection = projections_by_id[espn_id]
+        predicted_points = projection.predicted_points
+        projection_reason = projection.reason
+        resolved_team = player.team or projection.team
+        is_on_bye = projection.is_on_bye
+
+        if is_on_bye:
+            predicted_points = 0.0
+            projection_reason = (
+                f"{resolved_team} is on bye in week {week}."
+            )
+        elif (
+            player.availability == "unavailable"
+            and predicted_points is not None
+        ):
+            predicted_points = 0.0
+            projection_reason = (
+                f"ESPN lists this player as "
+                f"{player.injury_status}."
+            )
+
+        players_by_id[espn_id] = player.model_copy(
+            update={
+                "team": resolved_team,
+                "opponent_team": projection.opponent_team,
+                "base_predicted_points": (
+                    projection.predicted_points
+                ),
+                "predicted_points": predicted_points,
+                "projection_status": projection.status,
+                "projection_method": (
+                    projection.projection_method
+                ),
+                "history_games": projection.history_games,
+                "projection_reason": projection_reason,
+                "is_on_bye": is_on_bye,
+            }
+        )
+
+    players = sorted(
+        players_by_id.values(),
+        key=lambda player: (
+            PLAYER_POOL_POSITION_ORDER.get(
+                player.position,
+                99,
+            ),
+            -(
+                player.percent_owned
+                if player.percent_owned is not None
+                else -1.0
+            ),
+            player.player_name,
+        ),
+    )
+    available_count = sum(
+        player.roster_status == "available"
+        for player in players
+    )
+
+    return ESPNLeaguePlayersResponse(
+        league_id=league_id,
+        season=season,
+        week=week,
+        roster_week=roster_week,
+        player_count=len(players),
+        available_count=available_count,
+        rostered_count=len(players) - available_count,
+        players=players,
+    )
 
 
 @lru_cache(maxsize=2)
@@ -447,7 +713,10 @@ def build_team_projection_response(
         predicted_points = item.predicted_points
         adjustment_reason = None
 
-        if (
+        if item.is_on_bye:
+            predicted_points = 0.0
+            adjustment_reason = item.reason
+        elif (
             availability == "unavailable"
             and predicted_points is not None
         ):
@@ -474,6 +743,7 @@ def build_team_projection_response(
                 unavailable_teammates=(
                     item.unavailable_teammates
                 ),
+                is_on_bye=item.is_on_bye,
                 injury_status=injury_status,
                 availability=availability,
                 adjustment_reason=adjustment_reason,
@@ -539,6 +809,25 @@ def get_public_team_projections(
 
 
 @router.post(
+    "/players",
+    response_model=ESPNLeaguePlayersResponse,
+)
+def get_public_league_players(
+    payload: ESPNLeaguePlayersRequest,
+) -> ESPNLeaguePlayersResponse:
+    league = get_public_league(
+        league_id=payload.league_id,
+        season=payload.season,
+    )
+    return build_league_players_response(
+        league=league,
+        league_id=payload.league_id,
+        season=payload.season,
+        week=payload.week,
+    )
+
+
+@router.post(
     "/matchup",
     response_model=ESPNMatchupResponse,
 )
@@ -572,6 +861,26 @@ def connect_configured_private_league(
         league=league,
         league_id=config.league_id,
         season=config.season,
+    )
+
+
+@router.post(
+    "/local/players",
+    response_model=ESPNLeaguePlayersResponse,
+    include_in_schema=False,
+)
+def get_configured_private_league_players(
+    payload: ESPNLocalLeaguePlayersRequest,
+    request: Request,
+) -> ESPNLeaguePlayersResponse:
+    config, league = get_configured_private_league(
+        request
+    )
+    return build_league_players_response(
+        league=league,
+        league_id=config.league_id,
+        season=config.season,
+        week=payload.week,
     )
 
 

@@ -41,6 +41,7 @@ export type RosterProjection = {
   history_games: number | null
   injury_context_used: boolean
   unavailable_teammates: number
+  is_on_bye: boolean
   injury_status: string | null
   availability:
     | 'healthy'
@@ -78,6 +79,49 @@ export type MatchupResponse = {
   away: TeamProjectionResponse
 }
 
+export type LeaguePlayer = {
+  espn_id: number
+  player_name: string
+  position: string
+  team: string | null
+  roster_status: 'available' | 'rostered'
+  fantasy_team_id: number | null
+  fantasy_team_name: string | null
+  percent_owned: number | null
+  percent_started: number | null
+  season_average: number | null
+  opponent_team: string | null
+  base_predicted_points: number | null
+  predicted_points: number | null
+  projection_status: 'projected' | 'skipped'
+  projection_method:
+    | 'model'
+    | 'recent_average'
+    | 'position_average'
+    | null
+  history_games: number | null
+  projection_reason: string | null
+  is_on_bye: boolean
+  injury_status: string | null
+  availability:
+    | 'healthy'
+    | 'questionable'
+    | 'doubtful'
+    | 'unavailable'
+    | 'unknown'
+}
+
+export type LeaguePlayersResponse = {
+  league_id: number
+  season: number
+  week: number
+  roster_week: number
+  player_count: number
+  available_count: number
+  rostered_count: number
+  players: LeaguePlayer[]
+}
+
 export type ConnectLeagueInput = {
   league_id: number
   season: number
@@ -90,5 +134,13 @@ export type TeamProjectionInput = ConnectLeagueInput & {
 
 export type LocalTeamProjectionInput = {
   team_id: number
+  week: number
+}
+
+export type LeaguePlayersInput = ConnectLeagueInput & {
+  week: number
+}
+
+export type LocalLeaguePlayersInput = {
   week: number
 }

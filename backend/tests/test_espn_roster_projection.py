@@ -326,3 +326,109 @@ def test_live_unavailable_player_adds_team_context():
     assert healthy_request.teammate_out_target_share == 0.25
     assert healthy_request.teammate_out_carries == 1.0
     assert healthy_request.teammate_out_offense_pct == 0.9
+
+
+def test_nonstarting_qb_receives_zero_projection():
+    class QBProjectionService:
+        def __init__(self):
+            self.player_df = pd.DataFrame()
+
+        def project_requests(self, position, requests):
+            return ProjectionSlateResult(
+                projections=[
+                    PlayerProjection(
+                        request=request,
+                        position=position,
+                        predicted_points=20.0,
+                    )
+                    for request in requests
+                ],
+                skipped=[],
+            )
+
+    roster_players = [
+        ESPNRosterPlayer(
+            espn_id=1,
+            player_name="Starting Quarterback",
+            position="QB",
+            lineup_slot="QB",
+            team="BUF",
+            injury_status="ACTIVE",
+        ),
+        ESPNRosterPlayer(
+            espn_id=2,
+            player_name="Backup Quarterback",
+            position="QB",
+            lineup_slot="BE",
+            team="BUF",
+            injury_status="ACTIVE",
+        ),
+    ]
+    id_map = pd.DataFrame(
+        [
+            {
+                "espn_id": 1,
+                "player_id": "qb-1",
+                "position": "QB",
+            },
+            {
+                "espn_id": 2,
+                "player_id": "qb-2",
+                "position": "QB",
+            },
+        ]
+    )
+    roster_df = pd.DataFrame(
+        [
+            {
+                "player_id": player_id,
+                "player_name": player_id,
+                "position": "QB",
+                "team": "BUF",
+                "season": 2024,
+                "week": 1,
+            }
+            for player_id in ["qb-1", "qb-2"]
+        ]
+    )
+    depth_chart_df = pd.DataFrame(
+        [
+            {
+                "player_id": "qb-1",
+                "team": "BUF",
+                "position": "QB",
+                "depth_position": "QB",
+                "depth_team": 1,
+            },
+            {
+                "player_id": "qb-2",
+                "team": "BUF",
+                "position": "QB",
+                "depth_position": "QB",
+                "depth_team": 2,
+            },
+        ]
+    )
+
+    projections = project_espn_roster(
+        weekly_service=QBProjectionService(),
+        roster_players=roster_players,
+        id_map=id_map,
+        roster_df=roster_df,
+        opponents={"BUF": "MIA"},
+        season=2024,
+        week=1,
+        depth_chart_df=depth_chart_df,
+    )
+
+    by_espn_id = {
+        projection.espn_id: projection
+        for projection in projections
+    }
+    assert by_espn_id[1].predicted_points == 20.0
+    assert by_espn_id[1].status == "projected"
+    assert by_espn_id[2].predicted_points == 0.0
+    assert by_espn_id[2].status == "skipped"
+    assert "not the active starting quarterback" in (
+        by_espn_id[2].reason or ""
+    )
