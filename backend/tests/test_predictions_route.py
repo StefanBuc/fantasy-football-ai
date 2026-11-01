@@ -70,3 +70,17 @@ def test_weekly_projection_endpoint_returns_contract(
     assert body["projections"][0]["history_games"] is None
     assert body["projections"][0]["injury_context_used"] is False
     assert body["projections"][0]["unavailable_teammates"] == 0
+
+
+def test_weekly_refresh_uses_reloaded_service(monkeypatch):
+    from unittest.mock import Mock
+
+    refreshed = FakeProjectionService()
+    reload_service = Mock(return_value=refreshed)
+    monkeypatch.setattr(predictions_route.projection_services, "get", reload_service)
+    response = TestClient(app).get(
+        "/api/predictions/week/2024/1", params={"refresh": True}
+    )
+    assert response.status_code == 200
+    assert response.json()["generated_at"]
+    reload_service.assert_called_once_with(2024, refresh=True)

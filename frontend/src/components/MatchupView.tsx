@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ProjectionFreshness } from './ProjectionFreshness'
 
 import {
   getLocalMatchup,
@@ -243,22 +244,23 @@ export function MatchupView({
   const [error, setError] = useState<string | null>(null)
   const lastAutomaticRequest = useRef('')
 
-  const loadMatchup = useCallback(async () => {
+  const loadMatchup = useCallback(async (refresh = false) => {
     setIsLoading(true)
     setError(null)
 
     try {
       const result = connectionMode === 'local'
-        ? await getLocalMatchup({ team_id: selectedTeamId, week })
+        ? await getLocalMatchup({ team_id: selectedTeamId, week, refresh })
         : await getMatchup({
             league_id: league.league_id,
             season: league.season,
             team_id: selectedTeamId,
             week,
+            refresh,
           })
       setMatchup(result)
     } catch (caughtError) {
-      setMatchup(null)
+      if (!refresh) setMatchup(null)
       setError(
         caughtError instanceof Error
           ? caughtError.message
@@ -275,6 +277,7 @@ export function MatchupView({
       return
     }
     lastAutomaticRequest.current = requestKey
+    setMatchup(null)
     void loadMatchup()
   }, [loadMatchup, selectedTeamId, week])
 
@@ -304,6 +307,7 @@ export function MatchupView({
           <div className="grid gap-3 sm:grid-cols-[200px_130px_auto]">
             <select
               value={selectedTeamId}
+              disabled={isLoading}
               onChange={(event) => onTeamChange(Number(event.target.value))}
               aria-label="Fantasy team"
               className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500"
@@ -316,6 +320,7 @@ export function MatchupView({
             </select>
             <select
               value={week}
+              disabled={isLoading}
               onChange={(event) => onWeekChange(Number(event.target.value))}
               aria-label="NFL week"
               className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500"
@@ -328,7 +333,7 @@ export function MatchupView({
             </select>
             <button
               type="button"
-              onClick={() => void loadMatchup()}
+              onClick={() => void loadMatchup(true)}
               disabled={isLoading}
               className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-60"
             >
@@ -336,11 +341,22 @@ export function MatchupView({
             </button>
           </div>
         </div>
+        {isLoading && (
+          <p role="status" className="mt-3 text-sm text-slate-500">
+            {matchup
+              ? 'Refreshing NFL data and both lineups. Previous results remain visible.'
+              : 'Loading both lineups. The first request can take longer while data and models load.'}
+          </p>
+        )}
       </section>
 
       {error && (
         <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
           {error}
+          {matchup && <span> Showing previous results.</span>}
+          <button type="button" disabled={isLoading}
+            onClick={() => void loadMatchup(true)}
+            className="ml-3 font-bold underline">Retry</button>
         </div>
       )}
 
@@ -353,6 +369,7 @@ export function MatchupView({
 
       {matchup && (
         <>
+          <ProjectionFreshness generatedAt={matchup.home.generated_at} />
           <section className="mt-5 rounded-3xl bg-slate-950 px-5 py-7 text-white shadow-xl sm:px-8">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-5 text-center">
               <div>

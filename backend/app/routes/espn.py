@@ -1,4 +1,3 @@
-from functools import lru_cache
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -36,6 +35,7 @@ from app.schemas.espn import (
 from app.services.weekly_projection_service import (
     WeeklyProjectionService,
 )
+from app.services.projection_registry import projection_services
 from app.services.espn_projection_cache import (
     ESPNProjectionCache,
     build_league_week_projection,
@@ -354,11 +354,10 @@ def build_league_players_response(
     )
 
 
-@lru_cache(maxsize=2)
 def get_espn_projection_service(
     season: int,
 ) -> WeeklyProjectionService:
-    return WeeklyProjectionService(season=season)
+    return projection_services.get(season)
 
 
 def get_public_league(
@@ -604,6 +603,7 @@ def build_matchup_response(
     season: int,
     team_id: int,
     week: int,
+    service: WeeklyProjectionService | None = None,
 ) -> ESPNMatchupResponse:
     matchup = next(
         (
@@ -630,6 +630,9 @@ def build_matchup_response(
     home_team_id = int(matchup.home_team.team_id)
     away_team_id = int(matchup.away_team.team_id)
 
+    if service is None:
+        service = get_espn_projection_service(season)
+
     return ESPNMatchupResponse(
         league_id=league_id,
         league_name=str(league.settings.name),
@@ -643,6 +646,7 @@ def build_matchup_response(
             season=season,
             team_id=home_team_id,
             week=week,
+            service=service,
         ),
         away=build_team_projection_response(
             league=league,
@@ -650,6 +654,7 @@ def build_matchup_response(
             season=season,
             team_id=away_team_id,
             week=week,
+            service=service,
         ),
     )
 
@@ -660,6 +665,7 @@ def build_team_projection_response(
     season: int,
     team_id: int,
     week: int,
+    service: WeeklyProjectionService | None = None,
 ) -> ESPNTeamProjectionResponse:
     team = find_league_team(
         league=league,
@@ -667,14 +673,13 @@ def build_team_projection_response(
     )
 
     try:
-        service = get_espn_projection_service(
-            season=season
-        )
+        if service is None:
+            service = get_espn_projection_service(season=season)
         cache_key = (
             league_id,
             season,
             week,
-            roster_fingerprint(league),
+            f"{roster_fingerprint(league)}:{getattr(service, 'generation', '')}",
         )
         cached_projection, cache_hit = (
             projection_cache.get_or_create(
@@ -799,12 +804,14 @@ def get_public_team_projections(
         league_id=payload.league_id,
         season=payload.season,
     )
+    service = projection_services.get(payload.season, refresh=True) if payload.refresh else None
     return build_team_projection_response(
         league=league,
         league_id=payload.league_id,
         season=payload.season,
         team_id=payload.team_id,
         week=payload.week,
+        service=service,
     )
 
 
@@ -838,12 +845,14 @@ def get_public_matchup(
         league_id=payload.league_id,
         season=payload.season,
     )
+    service = projection_services.get(payload.season, refresh=True) if payload.refresh else None
     return build_matchup_response(
         league=league,
         league_id=payload.league_id,
         season=payload.season,
         team_id=payload.team_id,
         week=payload.week,
+        service=service,
     )
 @router.post(
     "/local/connect",
@@ -897,12 +906,14 @@ def get_configured_private_team_projections(
         request
     )
 
+    service = projection_services.get(config.season, refresh=True) if payload.refresh else None
     return build_team_projection_response(
         league=league,
         league_id=config.league_id,
         season=config.season,
         team_id=payload.team_id,
         week=payload.week,
+        service=service,
     )
 
 
@@ -916,10 +927,12 @@ def get_configured_private_matchup(
     request: Request,
 ) -> ESPNMatchupResponse:
     config, league = get_configured_private_league(request)
+    service = projection_services.get(config.season, refresh=True) if payload.refresh else None
     return build_matchup_response(
         league=league,
         league_id=config.league_id,
         season=config.season,
         team_id=payload.team_id,
         week=payload.week,
+        service=service,
     )

@@ -246,10 +246,16 @@ The full offensive-player model requires five previous games, and history can cr
 
 ## Projection performance and caching
 
-- Models and prepared NFL data are cached and reused per backend process.
+- The backend console logs request duration, response status, weekly and ESPN cache hits/misses, data loading, feature preparation, position service setup, and batched projections. Stage timings include `duration_ms` and report failures as `outcome=error`.
+- API responses include `X-Response-Time-ms` (time until response headers are ready), also accessible from the frontend. Request logs exclude query strings and bodies.
+- Models and prepared NFL data are cached and shared by the weekly and ESPN projection routes per backend process (up to two seasons).
+- Regular weekly projections are cached for 15 minutes per season, week, and position (up to 128 entries per season service). Concurrent requests share the computation, and restarting the backend clears the cache. Expiry recomputes predictions using the service's loaded data.
+- My Team and Matchup display when projections were last generated, in your local timezone. Refresh reloads the season's NFL data, rebuilds model features, and regenerates projections without restarting the backend. Previous results stay visible during refresh and on failure, with a retry option.
+- API clients can send `"refresh": true` in public/local team-projection and matchup POST bodies, or `refresh=true` on the weekly prediction GET route. Normal requests reuse cached results and preserve their original generation timestamps. Refresh can take as long as a first load; upstream sources may still have no new data.
+- Each model prints its actual CPU or CUDA device when loaded, including the GPU name when CUDA is used. Models load on the first request for their position.
 - Inference is batched by position instead of running players individually.
 - ESPN projections are generated for the whole fantasy league and cached for six hours.
-- The cache key includes a roster fingerprint, so trades, waivers, and lineup changes produce a new entry.
+- The cache key includes a roster fingerprint and the loaded data's generation, so roster changes and successful data refreshes produce new entries. Requests already running against older data cannot overwrite refreshed results. A failed data reload keeps the previous season service.
 - Injury status is applied after the base projection is loaded from cache. Confirmed unavailable players receive an adjusted projection of zero, while questionable and doubtful players retain their base projection with a warning.
 
 The current league cache is process-local, limited to 32 entries, and cleared on restart. A shared persistent cache is still required before horizontally scaling the API.
@@ -263,6 +269,8 @@ python -m pytest tests -v
 ```
 
 The test suite covers time-aware player histories, pregame defense construction, roster and depth-chart selection, ESPN player matching, league projection caching, injury adjustment, and API response contracts.
+
+`backend/pytest.ini` limits default discovery to `tests/`, keeping the interactive legacy `xgb_test.py` training script out of collection.
 
 ## Current limitations and roadmap
 

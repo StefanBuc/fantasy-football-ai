@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Literal
 
 
@@ -48,3 +49,4 @@ class SkippedPlayerProjection:
 class ProjectionSlateResult:
     projections: list[PlayerProjection]
     skipped: list[SkippedPlayerProjection]
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

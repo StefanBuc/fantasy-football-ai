@@ -128,11 +128,13 @@ export type ConnectLeagueInput = {
 }
 
 export type TeamProjectionInput = ConnectLeagueInput & {
+  refresh?: boolean
   team_id: number
   week: number
 }
 
 export type LocalTeamProjectionInput = {
+  refresh?: boolean
   team_id: number
   week: number
 }

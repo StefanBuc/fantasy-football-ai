@@ -45,6 +45,14 @@ def load_projection_checkpoint(checkpoint_path: str | Path, device: torch.device
     model.to(device)
     model.eval()
 
+    device_label = str(device).upper()
+    if device.type == "cuda":
+        device_label += f" ({torch.cuda.get_device_name(device)})"
+    print(
+        f"[PyTorch] {checkpoint_path}: using {device_label}",
+        flush=True,
+    )
+
     sequence_scaler = scaler_from_state(
         checkpoint["sequence_scaler"]
     )

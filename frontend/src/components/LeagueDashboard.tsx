@@ -15,6 +15,7 @@ import { LeagueStandings } from './LeagueStandings'
 import { MatchupView } from './MatchupView'
 import { PlayersView } from './PlayersView'
 import { ThemeToggle } from './ThemeToggle'
+import { ProjectionFreshness } from './ProjectionFreshness'
 
 export type ConnectionMode = 'public' | 'local'
 type DashboardView = 'team' | 'matchup' | 'players' | 'league'
@@ -312,7 +313,7 @@ export function LeagueDashboard({
   )
 
   const loadProjection = useCallback(
-    async (teamId: number, targetWeek: number) => {
+    async (teamId: number, targetWeek: number, refresh = false) => {
       if (!teamId) {
         return
       }
@@ -326,17 +327,19 @@ export function LeagueDashboard({
             ? await getLocalTeamProjections({
                 team_id: teamId,
                 week: targetWeek,
+                refresh,
               })
             : await getTeamProjections({
                 league_id: league.league_id,
                 season: league.season,
                 team_id: teamId,
                 week: targetWeek,
+                refresh,
               })
 
         setProjection(result)
       } catch (caughtError) {
-        setProjection(null)
+        if (!refresh) setProjection(null)
         setError(
           caughtError instanceof Error
             ? caughtError.message
@@ -467,6 +470,7 @@ export function LeagueDashboard({
                 <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-500">Fantasy team</span>
                 <select
                   value={selectedTeamId}
+                  disabled={isLoading}
                   onChange={(event) => changeTeam(Number(event.target.value))}
                   className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                 >
@@ -482,6 +486,7 @@ export function LeagueDashboard({
                 <span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-500">NFL week</span>
                 <select
                   value={week}
+                  disabled={isLoading}
                   onChange={(event) => changeWeek(Number(event.target.value))}
                   className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                 >
@@ -496,20 +501,34 @@ export function LeagueDashboard({
 
               <button
                 type="button"
-                onClick={() => void loadProjection(selectedTeamId, week)}
+                onClick={() => void loadProjection(selectedTeamId, week, Boolean(projection))}
                 disabled={isLoading || !selectedTeamId}
                 className="h-11 self-end rounded-xl bg-emerald-600 px-5 text-sm font-black text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-wait disabled:opacity-60"
               >
-                {isLoading ? 'Loading…' : 'Update projections'}
+                {isLoading ? 'Loading…' : projection ? 'Refresh projections' : 'Load projections'}
               </button>
             </div>
           </div>
+          {projection && <ProjectionFreshness generatedAt={projection.generated_at} />}
+          {isLoading && (
+            <p role="status" className="mt-3 text-sm text-slate-500">
+              {projection
+                ? 'Refreshing NFL data and projections. Previous results remain visible.'
+                : 'Loading projections. The first request can take longer while data and models load.'}
+            </p>
+          )}
         </section>
 
         {error && (
           <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
             <span className="font-black">Could not load this week: </span>
             {error}
+            {projection && <span> Showing previous results. Try Refresh projections again.</span>}
+            {!projection && (
+              <button type="button" disabled={isLoading}
+                onClick={() => void loadProjection(selectedTeamId, week)}
+                className="ml-3 font-bold underline">Retry</button>
+            )}
           </div>
         )}
 

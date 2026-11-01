@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from threading import Lock
 from typing import Callable
+from app.services.performance import logger, timed_stage
 
 from app.integrations.espn_roster_projection import (
     ESPNRosterPlayer,
@@ -56,12 +57,15 @@ class ESPNProjectionCache:
                 and now - entry.generated_at < self.ttl
             ):
                 self._entries.move_to_end(key)
+                logger.info("cache=espn_league result=hit season=%s week=%s", key[1], key[2])
                 return entry, True
 
             if entry is not None:
                 del self._entries[key]
 
-            entry = builder()
+            logger.info("cache=espn_league result=miss season=%s week=%s", key[1], key[2])
+            with timed_stage("espn_league_projection", season=key[1], week=key[2]):
+                entry = builder()
             self._entries[key] = entry
             self._entries.move_to_end(key)
 

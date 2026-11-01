@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 import pandas as pd
 
@@ -16,6 +19,67 @@ from app.services.projection_types import (
     ProjectionSlateResult,
 )
 from app.schemas.espn import ESPNTeamProjectionResponse
+
+
+@pytest.mark.parametrize("path", ["/api/espn/projections", "/api/espn/local/projections"])
+def test_refresh_rebuilds_league_cache_and_updates_timestamp(monkeypatch, path):
+    league = make_private_league()
+    old = FakeESPNProjectionService()
+    old.generation = "old"
+    fresh = FakeESPNProjectionService()
+    fresh.generation = "fresh"
+    current = [old]
+
+    def reload_service(season, refresh=False):
+        assert season == 2024 and refresh
+        current[0] = fresh
+        return fresh
+
+    reload_mock = Mock(side_effect=reload_service)
+    monkeypatch.setattr(espn_route.projection_services, "get", reload_mock)
+    monkeypatch.setattr(espn_route, "get_espn_projection_service", lambda season: current[0])
+    monkeypatch.setattr(espn_route, "get_public_league", lambda **kwargs: league)
+    monkeypatch.setattr(espn_route, "get_configured_private_league",
+                        lambda request: (SimpleNamespace(league_id=123, season=2024), league))
+    espn_route.projection_cache.clear()
+    client = TestClient(app)
+    body = {"league_id": 123, "season": 2024, "team_id": 1, "week": 1}
+    first = client.post(path, json=body)
+    refreshed = client.post(path, json={**body, "refresh": True})
+    cached = client.post(path, json=body)
+    assert first.status_code == refreshed.status_code == cached.status_code == 200
+    assert refreshed.json()["cache_hit"] is False
+    assert refreshed.json()["generated_at"] != first.json()["generated_at"]
+    assert cached.json()["cache_hit"] is True
+    assert cached.json()["generated_at"] == refreshed.json()["generated_at"]
+    reload_mock.assert_called_once_with(2024, refresh=True)
+
+@pytest.mark.parametrize("path", ["/api/espn/matchup", "/api/espn/local/matchup"])
+def test_matchup_refresh_reloads_once_for_both_teams(monkeypatch, path):
+    league = make_private_league()
+    league.teams.append(SimpleNamespace(team_id=2, team_name="Opponent", roster=[]))
+    league.scoreboard = lambda week: [SimpleNamespace(
+        home_team=league.teams[0], away_team=league.teams[1],
+        home_score=0, away_score=0,
+    )]
+    fresh = FakeESPNProjectionService()
+    fresh.generation = "refreshed_matchup"
+    reload_mock = Mock(return_value=fresh)
+    monkeypatch.setattr(espn_route.projection_services, "get", reload_mock)
+    monkeypatch.setattr(espn_route, "get_public_league", lambda **kwargs: league)
+    monkeypatch.setattr(espn_route, "get_configured_private_league",
+                        lambda request: (SimpleNamespace(league_id=123, season=2024), league))
+    espn_route.projection_cache.clear()
+    response = TestClient(app).post(path, json={
+        "league_id": 123, "season": 2024, "team_id": 1, "week": 1, "refresh": True,
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["home"]["generated_at"] == body["away"]["generated_at"]
+    assert body["home"]["cache_hit"] is False
+    assert body["away"]["cache_hit"] is True
+    reload_mock.assert_called_once_with(2024, refresh=True)
+
 
 def test_connect_public_league(monkeypatch):
     fake_league = SimpleNamespace(
@@ -508,6 +572,7 @@ def test_build_matchup_response_finds_team_opponent(
         season,
         team_id,
         week,
+        service=None,
     ):
         return ESPNTeamProjectionResponse(
             league_id=league_id,
@@ -529,6 +594,8 @@ def test_build_matchup_response_finds_team_opponent(
         "build_team_projection_response",
         fake_projection_response,
     )
+    monkeypatch.setattr(espn_route, "get_espn_projection_service",
+                        lambda season: FakeESPNProjectionService())
 
     result = espn_route.build_matchup_response(
         league=league,

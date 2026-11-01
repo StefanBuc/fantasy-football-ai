@@ -1,4 +1,7 @@
 from typing import cast
+from uuid import uuid4
+from app.services.result_cache import ResultCache
+from app.services.performance import timed_stage
 
 from app.services.pytorch_inference import (
     PyTorchProjectionService,
@@ -36,6 +39,7 @@ SUPPORTED_POSITIONS = {
 class WeeklyProjectionService:
     def __init__(self, season: int):
         self.season = season
+        self.generation = uuid4().hex
 
         self.data = NFLData(
             [
@@ -44,18 +48,19 @@ class WeeklyProjectionService:
             ]
         )
 
-        self.data.load_data()
-        self.data.load_schedule()
-        self.data.load_weekly_rosters()
-        self.data.load_depth_charts()
+        for stage, loader in (
+            ("nfl_data", self.data.load_data),
+            ("schedule", self.data.load_schedule),
+            ("rosters", self.data.load_weekly_rosters),
+            ("depth_charts", self.data.load_depth_charts),
+        ):
+            with timed_stage(stage, season=season):
+                loader()
 
-        self.player_df = (
-            self.data.get_player_stats()
-        )
-
-        self.defense_df = (
-            self.data.get_defense_stats()
-        )
+        with timed_stage("player_features", season=season):
+            self.player_df = self.data.get_player_stats()
+        with timed_stage("defense_features", season=season):
+            self.defense_df = self.data.get_defense_stats()
 
         # Models are created only when their position
         # is requested, then reused.
@@ -64,6 +69,7 @@ class WeeklyProjectionService:
             PyTorchProjectionService | SpecialTeamsProjectionService,
         ] = {}
         self.special_teams_data = None
+        self.weekly_cache = ResultCache[ProjectionSlateResult](name="weekly")
 
     def _get_position_service(
         self,
@@ -119,14 +125,16 @@ class WeeklyProjectionService:
     ) -> ProjectionSlateResult:
         normalized_position = position.upper()
 
-        service = self._get_position_service(
-            normalized_position
-        )
+        with timed_stage("position_service", season=self.season,
+                         position=normalized_position):
+            service = self._get_position_service(normalized_position)
 
-        return project_position_slate(
-            service=cast(PyTorchProjectionService, service),
-            requests=requests,
-        )
+        with timed_stage("projection_batch", season=self.season,
+                         position=normalized_position, players=len(requests)):
+            return project_position_slate(
+                service=cast(PyTorchProjectionService, service),
+                requests=requests,
+            )
 
     def project_week(
         self,
@@ -140,6 +148,16 @@ class WeeklyProjectionService:
 
         normalized_position = position.upper()
 
+        return self.weekly_cache.get_or_create(
+            (self.season, week, normalized_position),
+            lambda: self._project_week_uncached(week, normalized_position),
+        )
+
+    def _project_week_uncached(
+        self,
+        week: int,
+        normalized_position: str,
+    ) -> ProjectionSlateResult:
         roster_df = self.data.get_week_roster(
             season=self.season,
             week=week,
@@ -157,12 +175,14 @@ class WeeklyProjectionService:
             )
         )
 
-        requests = build_projection_requests(
-            roster_df=roster_df,
-            opponents=opponents,
-            position=normalized_position,
-            depth_chart_df=depth_chart_df,
-        )
+        with timed_stage("projection_requests", season=self.season,
+                         week=week, position=normalized_position):
+            requests = build_projection_requests(
+                roster_df=roster_df,
+                opponents=opponents,
+                position=normalized_position,
+                depth_chart_df=depth_chart_df,
+            )
 
         return self.project_requests(
             position=normalized_position,

@@ -1,4 +1,5 @@
 from typing import Literal
+from datetime import datetime
 
 from pydantic import BaseModel
 
@@ -41,6 +42,7 @@ class SkippedPlayerResponse(
 
 
 class WeeklyProjectionResponse(BaseModel):
+    generated_at: datetime
     season: int
     week: int
     position: Position

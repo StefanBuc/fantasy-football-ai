@@ -1,7 +1,7 @@
-from functools import lru_cache
 from fastapi import (APIRouter, HTTPException, Path, Query)
 from datetime import date
 from typing import Annotated
+from app.services.projection_registry import projection_services
 
 from app.schemas.predictions import (
     PlayerProjectionResponse,
@@ -16,9 +16,8 @@ from app.services.weekly_projection_service import (
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 
-@lru_cache(maxsize=2)
 def get_projection_service(season: int,) -> WeeklyProjectionService:
-    return WeeklyProjectionService(season=season)
+    return projection_services.get(season)
 
 @router.get("/week/{season}/{week}", response_model=WeeklyProjectionResponse)
 def get_weekly_projections(
@@ -32,9 +31,13 @@ def get_weekly_projections(
     ],
     position: Position = Query(default="QB", description="Position to project"),
     include_skipped: bool = Query(default=False, description="Whether to include skipped players in the response"),
+    refresh: bool = Query(default=False, description="Reload NFL data and regenerate projections"),
 ) -> WeeklyProjectionResponse:
     try:
-        service = get_projection_service(season=season)
+        service = (
+            projection_services.get(season, refresh=True)
+            if refresh else get_projection_service(season=season)
+        )
         result = service.project_week(week=week, position=position)
     
     except ValueError as error:
@@ -112,6 +115,7 @@ def get_weekly_projections(
         ]
 
     return WeeklyProjectionResponse(
+        generated_at=result.generated_at,
         season=season,
         week=week,
         position=position,

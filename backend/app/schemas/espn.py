@@ -37,6 +37,7 @@ class ESPNLeagueConnectRequest(BaseModel):
 
 
 class ESPNTeamProjectionRequest(BaseModel):
+    refresh: bool = False
     league_id: int = Field(gt=0)
     season: int = Field(
         ge=2020,
@@ -47,6 +48,7 @@ class ESPNTeamProjectionRequest(BaseModel):
 
 
 class ESPNLocalTeamProjectionRequest(BaseModel):
+    refresh: bool = False
     team_id: int = Field(gt=0)
     week: int = Field(ge=1, le=18)
 
