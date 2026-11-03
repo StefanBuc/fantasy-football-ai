@@ -25,7 +25,8 @@ def source_fingerprint() -> str:
         "services/special_teams_inference.py", "config/model_config.py",
         "integrations/espn_roster_projection.py", "integrations/espn_player_matching.py",
     )
-    for path in sorted(root / name for name in source_files):
+    for path in sorted((root / name for name in source_files),
+                       key=lambda item: item.relative_to(root).as_posix().lower()):
         digest.update(str(path.relative_to(root)).replace("\\", "/").encode())
         digest.update(path.read_bytes())
     for package in ("pandas", "numpy", "fastparquet"):

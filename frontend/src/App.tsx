@@ -22,6 +22,7 @@ import type {
 const currentSeason = new Date().getFullYear()
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
 const showLocalLeagueOption = import.meta.env.DEV
+  || import.meta.env.VITE_ENABLE_LOCAL_LEAGUE === 'true'
 
 function hasConnectedLeague(league: ESPNLeague | null): boolean {
   return league !== null

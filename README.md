@@ -81,6 +81,8 @@ The models can run on CPU. PyTorch automatically uses CUDA when a compatible GPU
 
 ## Backend setup
 
+For container setup instead of local Python/Node environments, see [Docker setup](#docker-setup).
+
 From the repository root:
 
 ```powershell
@@ -137,6 +139,43 @@ Useful frontend checks:
 npm run lint
 npm run build
 ```
+
+## Docker setup
+
+Docker Desktop must be running with Linux containers. Use Compose 2.24 or newer for optional environment files. This runs a built React frontend through Nginx and a FastAPI backend, with CPU PyTorch 2.15 by default.
+
+From the repository root:
+
+```powershell
+docker compose up --build -d --wait
+```
+
+Open **http://localhost:8080**. API documentation is at **http://localhost:8000/docs**. The first image build downloads Python, Node, and PyTorch dependencies. Models and data still load on their first uncached request; Docker does not make that download instant.
+
+The model directory `backend/models/pytorch/` must exist and contain the selected checkpoints. It is mounted read-only rather than copied into an image. Credentials are read at runtime from `backend/.env`, when present; `.env` files, model files, and caches are excluded from image builds. For the private-league button, configure that file as described below, including `ESPN_ENABLE_LOCAL_API=true`. The frontend build explicitly enables the local-league option.
+
+Both services publish only on your computer's loopback address. The frontend shares the backend's network namespace so its API proxy connects through `127.0.0.1`; this preserves the existing private-league loopback check without trusting browser-supplied forwarded headers. This configuration is for local use. A public deployment needs authentication before enabling private-league routes.
+
+Docker cache data lives in the `projection-cache` named volume, separate from `backend/cache/`, and survives container rebuilds and `docker compose down`. Avoid `down --volumes` unless you want to delete that cache. The cache fingerprints use a consistent file order on Windows and Linux.
+
+Useful commands:
+
+```powershell
+docker compose logs -f backend
+docker compose ps
+docker compose down
+```
+
+For a port conflict, set `$env:FRONTEND_PORT = '8081'` or `$env:BACKEND_PORT = '8001'` before starting Compose. For source changes, run `docker compose up --build -d --wait` again; this setup uses built images rather than development hot reload.
+
+An optional NVIDIA setup is included:
+
+```powershell
+docker compose -f compose.yaml -f compose.gpu.yaml up --build -d --wait
+docker compose -f compose.yaml -f compose.gpu.yaml exec backend python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
+The override selects PyTorch's CUDA 13.4 wheels and requests the NVIDIA GPU. Windows GPU access requires Docker Desktop's WSL 2 backend and compatible NVIDIA drivers; see [Docker's GPU setup](https://docs.docker.com/desktop/features/gpu/). CPU mode works without GPU passthrough. To return to CPU, run the default Compose command with `--build` again.
 
 ## ESPN configuration
 
