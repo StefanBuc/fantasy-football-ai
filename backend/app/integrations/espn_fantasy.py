@@ -1,7 +1,12 @@
 from espn_api.football import League
 
 def get_league(league_id, year = 2026, espn_s2 = None, swid = None):
-    return League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid)
+    from app.services.espn_connection_cache import espn_connection_cache
+
+    return espn_connection_cache.get(
+        league_id, year, espn_s2, swid,
+        lambda: League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid),
+    )
 
 def find_team(league, team_id):
     return next(

@@ -158,6 +158,9 @@ class ESPNTeamProjectionResponse(BaseModel):
 
 
 class ESPNMatchupResponse(BaseModel):
+    home_win_pct: float | None = Field(default=None, ge=0, le=100)
+    away_win_pct: float | None = Field(default=None, ge=0, le=100)
+    win_probability_note: str = "Pregame estimate unavailable."
     league_id: int
     league_name: str
     season: int

@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -8,7 +9,7 @@ from app.services import projection_registry
 
 
 def test_refresh_replaces_only_the_requested_season(monkeypatch):
-    factory = Mock(side_effect=lambda season: SimpleNamespace(season=season))
+    factory = Mock(side_effect=lambda season, refresh=False: SimpleNamespace(season=season))
     monkeypatch.setattr(projection_registry, "WeeklyProjectionService", factory)
     registry = projection_registry.ProjectionServiceRegistry()
     first = registry.get(2024)
@@ -38,3 +39,26 @@ def test_concurrent_initial_load_is_shared(monkeypatch):
         results = list(executor.map(lambda _: registry.get(2024), range(8)))
     assert all(result is results[0] for result in results)
     factory.assert_called_once_with(season=2024)
+
+
+def test_normal_requests_do_not_wait_for_full_data_refresh(monkeypatch):
+    first, fresh = object(), object()
+    started, release = Event(), Event()
+    def factory(season, refresh=False):
+        if refresh:
+            started.set()
+            assert release.wait(timeout=3)
+            return fresh
+        return first
+    monkeypatch.setattr(projection_registry, "WeeklyProjectionService", factory)
+    registry = projection_registry.ProjectionServiceRegistry()
+    registry.get(2024)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        updating = executor.submit(registry.get, 2024, True)
+        try:
+            assert started.wait(timeout=3)
+            assert executor.submit(registry.get, 2024).result(timeout=1) is first
+        finally:
+            release.set()
+        assert updating.result(timeout=3) is fresh
+    assert registry.get(2024) is fresh

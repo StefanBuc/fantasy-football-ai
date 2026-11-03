@@ -5,6 +5,7 @@ import {
   type ConnectionMode,
 } from './components/LeagueDashboard'
 import { ThemeToggle } from './components/ThemeToggle'
+import { viewCache } from './lib/viewCache'
 import {
   connectLeague,
   connectLocalLeague,
@@ -257,6 +258,7 @@ function App() {
   }
 
   function resetLeague() {
+    viewCache.clear()
     setLeague(null)
     setProjection(null)
     setSelectedTeamId(null)

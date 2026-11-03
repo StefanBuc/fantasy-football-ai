@@ -36,6 +36,8 @@ from app.services.weekly_projection_service import (
     WeeklyProjectionService,
 )
 from app.services.projection_registry import projection_services
+from app.services.matchup_probability import estimate_win_chance
+from app.services.espn_connection_cache import espn_connection_cache
 from app.services.espn_projection_cache import (
     ESPNProjectionCache,
     build_league_week_projection,
@@ -61,7 +63,7 @@ ESPN_TEAM_ALIASES = {
     "WSH": "WAS",
 }
 
-projection_cache = ESPNProjectionCache()
+projection_cache = ESPNProjectionCache(persistent=True)
 
 PLAYER_POOL_POSITIONS = {
     "QB",
@@ -633,6 +635,14 @@ def build_matchup_response(
     if service is None:
         service = get_espn_projection_service(season)
 
+    home = build_team_projection_response(
+        league=league, league_id=league_id, season=season,
+        team_id=home_team_id, week=week, service=service,
+    )
+    away = build_team_projection_response(
+        league=league, league_id=league_id, season=season,
+        team_id=away_team_id, week=week, service=service,
+    )
     return ESPNMatchupResponse(
         league_id=league_id,
         league_name=str(league.settings.name),
@@ -640,22 +650,9 @@ def build_matchup_response(
         week=week,
         home_score=float(matchup.home_score),
         away_score=float(matchup.away_score),
-        home=build_team_projection_response(
-            league=league,
-            league_id=league_id,
-            season=season,
-            team_id=home_team_id,
-            week=week,
-            service=service,
-        ),
-        away=build_team_projection_response(
-            league=league,
-            league_id=league_id,
-            season=season,
-            team_id=away_team_id,
-            week=week,
-            service=service,
-        ),
+        home=home,
+        away=away,
+        **estimate_win_chance(home, away, service.player_df),
     )
 
 
@@ -679,7 +676,7 @@ def build_team_projection_response(
             league_id,
             season,
             week,
-            f"{roster_fingerprint(league)}:{getattr(service, 'generation', '')}",
+            f"{roster_fingerprint(league, week)}:{getattr(service, 'generation', '')}",
         )
         cached_projection, cache_hit = (
             projection_cache.get_or_create(
@@ -800,6 +797,8 @@ def connect_public_league(
 def get_public_team_projections(
     payload: ESPNTeamProjectionRequest,
 ) -> ESPNTeamProjectionResponse:
+    if payload.refresh:
+        espn_connection_cache.clear()
     league = get_public_league(
         league_id=payload.league_id,
         season=payload.season,
@@ -841,6 +840,8 @@ def get_public_league_players(
 def get_public_matchup(
     payload: ESPNTeamProjectionRequest,
 ) -> ESPNMatchupResponse:
+    if payload.refresh:
+        espn_connection_cache.clear()
     league = get_public_league(
         league_id=payload.league_id,
         season=payload.season,
@@ -902,6 +903,8 @@ def get_configured_private_team_projections(
     payload: ESPNLocalTeamProjectionRequest,
     request: Request,
 ) -> ESPNTeamProjectionResponse:
+    if payload.refresh:
+        espn_connection_cache.clear()
     config, league = get_configured_private_league(
         request
     )
@@ -926,6 +929,8 @@ def get_configured_private_matchup(
     payload: ESPNLocalTeamProjectionRequest,
     request: Request,
 ) -> ESPNMatchupResponse:
+    if payload.refresh:
+        espn_connection_cache.clear()
     config, league = get_configured_private_league(request)
     service = projection_services.get(config.season, refresh=True) if payload.refresh else None
     return build_matchup_response(

@@ -246,10 +246,12 @@ The full offensive-player model requires five previous games, and history can cr
 
 ## Projection performance and caching
 
+- My Team, Matchup, and Players keep up to 12 recently loaded views in browser session storage for 15 minutes. Returning to a view shows saved results immediately while checking the API for updates. Background failures keep the saved view visible with an error. Connection mode, API URL, league, season, week, and team separate entries; changing leagues or successfully forcing a data refresh clears saved views. Browser storage is optional and stores no ESPN credentials.
+- Identical frontend requests share an in-flight HTTP call. Completed calls are not reused by this mechanism, so background checks still contact the backend. Responses from a previous team/week request cannot replace the currently selected view.
 - The backend console logs request duration, response status, weekly and ESPN cache hits/misses, data loading, feature preparation, position service setup, and batched projections. Stage timings include `duration_ms` and report failures as `outcome=error`.
 - API responses include `X-Response-Time-ms` (time until response headers are ready), also accessible from the frontend. Request logs exclude query strings and bodies.
 - Models and prepared NFL data are cached and shared by the weekly and ESPN projection routes per backend process (up to two seasons).
-- Regular weekly projections are cached for 15 minutes per season, week, and position (up to 128 entries per season service). Concurrent requests share the computation, and restarting the backend clears the cache. Expiry recomputes predictions using the service's loaded data.
+- Regular weekly projections are cached for 15 minutes per season, week, and position (up to 128 entries per season service). Concurrent requests share the computation. Unexpired projections now survive backend restarts; expiry recomputes predictions using the service's loaded data.
 - My Team and Matchup display when projections were last generated, in your local timezone. Refresh reloads the season's NFL data, rebuilds model features, and regenerates projections without restarting the backend. Previous results stay visible during refresh and on failure, with a retry option.
 - API clients can send `"refresh": true` in public/local team-projection and matchup POST bodies, or `refresh=true` on the weekly prediction GET route. Normal requests reuse cached results and preserve their original generation timestamps. Refresh can take as long as a first load; upstream sources may still have no new data.
 - Each model prints its actual CPU or CUDA device when loaded, including the GPU name when CUDA is used. Models load on the first request for their position.
@@ -258,7 +260,17 @@ The full offensive-player model requires five previous games, and history can cr
 - The cache key includes a roster fingerprint and the loaded data's generation, so roster changes and successful data refreshes produce new entries. Requests already running against older data cannot overwrite refreshed results. A failed data reload keeps the previous season service.
 - Injury status is applied after the base projection is loaded from cache. Confirmed unavailable players receive an adjusted projection of zero, while questionable and doubtful players retain their base projection with a warning.
 
-The current league cache is process-local, limited to 32 entries, and cleared on restart. A shared persistent cache is still required before horizontally scaling the API.
+Prepared NFL data, special-teams weekly tables, and projection results are also saved locally in `backend/cache/runtime.sqlite3` (Git-ignored). NFL and special-teams snapshots expire after six hours; league projections expire six hours after generation, and regular weekly projections after 15 minutes. Cache reads do not extend expiry. On restart, valid snapshots open without decoding every table: cached team projections need no NFL tables, and other tables load individually on demand. Valid projections skip inference. The first uncached load still takes time. Normal requests keep using the previous service while a forced data refresh runs.
+
+Cache keys include source-code fingerprints, the selected checkpoint contents, the NFL data generation, and the relevant request/roster inputs. Refresh bypasses saved NFL data and creates a new generation. Expired entries are pruned; disk storage is limited to four NFL snapshots, four special-teams snapshots, 32 league projections, 128 weekly projections per generation, and 256 entries overall. Unreadable or invalid entries fall back to normal computation. This is a local single-host cache; shared hosting still needs shared storage.
+
+Set the `FANTASY_CACHE_PATH` environment variable before starting the backend to choose another cache file. To reset all saved entries, stop the backend and delete only `backend/cache/runtime.sqlite3`. ESPN credentials are not stored in this disk cache. ESPN league connections are reused in memory for up to 15 seconds to avoid downloading the league twice during Connect followed by projections. Different credentials have separate entries; Refresh bypasses this short cache to fetch current roster/availability.
+
+## Matchup win chance
+
+Matchup shows an estimated pregame win percentage for each team. It sums projected starter points and approximates their combined variability using up to 16 prior scoring games per offensive player, with position defaults for limited history, kickers, and D/ST. Short histories are shrunk toward the defaults. Bench and IR players are excluded; bye and confirmed unavailable players contribute zero. Missing starter projections produce an unavailable message instead of a misleading percentage.
+
+The calculation assumes independent player scores and a normal distribution of the scoring difference. It is a rough estimate, has not been validated against actual matchup outcomes, and does not incorporate live ESPN scores or game progress. Accuracy tracking and floor/ceiling projections remain future work.
 
 ## Tests
 
@@ -272,12 +284,14 @@ The test suite covers time-aware player histories, pregame defense construction,
 
 `backend/pytest.ini` limits default discovery to `tests/`, keeping the interactive legacy `xgb_test.py` training script out of collection.
 
+Frontend cache and request-deduplication tests run from `frontend/` with `npm.cmd test` (verified with Node 26, using built-in TypeScript stripping). Run `npm.cmd run build` and `npm.cmd run lint` for frontend checks.
+
 ## Current limitations and roadmap
 
 The next planned work is:
 
 1. Train and evaluate injury-context checkpoints before promoting them to production.
-2. Replace the process-local projection cache with Redis or persistent database storage.
+2. Move the local SQLite cache to shared storage if deploying multiple API hosts.
 3. Add an automated weekly data refresh, evaluation, projection, and optional retraining pipeline.
 4. Add production deployment configuration, meaningful readiness checks, restricted CORS, HTTPS, logging, and monitoring.
 

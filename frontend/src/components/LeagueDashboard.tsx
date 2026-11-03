@@ -15,6 +15,7 @@ import { LeagueStandings } from './LeagueStandings'
 import { MatchupView } from './MatchupView'
 import { PlayersView } from './PlayersView'
 import { ThemeToggle } from './ThemeToggle'
+import { viewCache, viewKey } from '../lib/viewCache'
 import { ProjectionFreshness } from './ProjectionFreshness'
 
 export type ConnectionMode = 'public' | 'local'
@@ -301,11 +302,14 @@ export function LeagueDashboard({
     league.teams[0]?.team_id ?? 0,
   )
   const [week, setWeek] = useState(league.current_week)
-  const [projection, setProjection] = useState<TeamProjectionResponse | null>(null)
+  const [projection, setProjection] = useState<TeamProjectionResponse | null>(() =>
+    viewCache.read(viewKey('team', connectionMode, league.league_id, league.season,
+      league.current_week, league.teams[0]?.team_id ?? 0)))
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<DashboardView>('team')
-  const initialRequestStarted = useRef(false)
+  const requestVersion = useRef(0)
+  const [isRefreshingData, setIsRefreshingData] = useState(false)
 
   const selectedTeam = useMemo(
     () => league.teams.find((team) => team.team_id === selectedTeamId),
@@ -317,6 +321,12 @@ export function LeagueDashboard({
       if (!teamId) {
         return
       }
+
+      const version = ++requestVersion.current
+      const key = viewKey('team', connectionMode, league.league_id, league.season, targetWeek, teamId)
+      const saved = refresh ? null : viewCache.read<TeamProjectionResponse>(key)
+      if (!refresh) setProjection(saved)
+      setIsRefreshingData(refresh)
 
       setIsLoading(true)
       setError(null)
@@ -337,29 +347,33 @@ export function LeagueDashboard({
                 refresh,
               })
 
+        if (version !== requestVersion.current) return
+        if (refresh) viewCache.clear()
+        viewCache.write(key, result)
         setProjection(result)
       } catch (caughtError) {
-        if (!refresh) setProjection(null)
+        if (version !== requestVersion.current) return
+        if (!refresh && !saved) setProjection(null)
         setError(
           caughtError instanceof Error
             ? caughtError.message
             : 'The roster projections could not be loaded.',
         )
       } finally {
-        setIsLoading(false)
+        if (version === requestVersion.current) setIsLoading(false)
       }
     },
     [connectionMode, league.league_id, league.season],
   )
 
   useEffect(() => {
-    if (initialRequestStarted.current || !selectedTeamId) {
-      return
+    if (activeView !== 'team') return
+    const timer = window.setTimeout(() => { void loadProjection(selectedTeamId, week) }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      requestVersion.current += 1
     }
-
-    initialRequestStarted.current = true
-    void loadProjection(selectedTeamId, week)
-  }, [loadProjection, selectedTeamId, week])
+  }, [activeView, loadProjection, selectedTeamId, week])
 
   const starters = useMemo(() => {
     if (!projection) {
@@ -513,7 +527,9 @@ export function LeagueDashboard({
           {isLoading && (
             <p role="status" className="mt-3 text-sm text-slate-500">
               {projection
-                ? 'Refreshing NFL data and projections. Previous results remain visible.'
+                ? isRefreshingData
+                  ? 'Refreshing NFL data and projections. Previous results remain visible.'
+                  : 'Checking for updates. Showing saved results.'
                 : 'Loading projections. The first request can take longer while data and models load.'}
             </p>
           )}

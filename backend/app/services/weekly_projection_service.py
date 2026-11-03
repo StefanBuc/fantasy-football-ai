@@ -1,7 +1,13 @@
 from typing import cast
 from uuid import uuid4
+from hashlib import sha256
+from app.services.data_snapshot import (
+    source_fingerprint, model_fingerprint, encode_frames, decode_frames, FrameSnapshot,
+)
+from app.services.snapshot_nfl_data import SnapshotNFLData
+from app.services.disk_cache import disk_cache
 from app.services.result_cache import ResultCache
-from app.services.performance import timed_stage
+from app.services.performance import logger, timed_stage
 
 from app.services.pytorch_inference import (
     PyTorchProjectionService,
@@ -37,9 +43,10 @@ SUPPORTED_POSITIONS = {
 
 
 class WeeklyProjectionService:
-    def __init__(self, season: int):
+    def __init__(self, season: int, refresh: bool = False):
         self.season = season
-        self.generation = uuid4().hex
+        self._data_generation = uuid4().hex
+        self._snapshot_key = (season, source_fingerprint())
 
         self.data = NFLData(
             [
@@ -48,6 +55,24 @@ class WeeklyProjectionService:
             ]
         )
 
+        restored = False if refresh else self._restore_snapshot()
+        if not restored:
+            self._load_data(season)
+            self._save_snapshot()
+        self.generation = sha256(
+            f"{self._data_generation}:{model_fingerprint()}".encode()
+        ).hexdigest()
+
+        # Models stay lazy; cached projections need no checkpoint loading.
+        self.position_services: dict[
+            str, PyTorchProjectionService | SpecialTeamsProjectionService,
+        ] = {}
+        self.special_teams_data = None
+        self.weekly_cache = ResultCache[ProjectionSlateResult](
+            name="weekly", persistent_key=self.generation,
+        )
+
+    def _load_data(self, season: int) -> None:
         for stage, loader in (
             ("nfl_data", self.data.load_data),
             ("schedule", self.data.load_schedule),
@@ -62,14 +87,63 @@ class WeeklyProjectionService:
         with timed_stage("defense_features", season=season):
             self.defense_df = self.data.get_defense_stats()
 
-        # Models are created only when their position
-        # is requested, then reused.
-        self.position_services: dict[
-            str,
-            PyTorchProjectionService | SpecialTeamsProjectionService,
-        ] = {}
-        self.special_teams_data = None
-        self.weekly_cache = ResultCache[ProjectionSlateResult](name="weekly")
+    _SNAPSHOT_FIELDS = ("weekly", "snap_counts", "ids", "schedule",
+                        "weekly_rosters", "depth_charts")
+
+    def __getattr__(self, name):
+        table = {"player_df": "player_features", "defense_df": "defense_features"}.get(name)
+        snapshot = self.__dict__.get("_snapshot")
+        if table is not None and snapshot is not None:
+            frame = snapshot[table]
+            setattr(self, name, frame)
+            return frame
+        raise AttributeError(name)
+
+    def _restore_snapshot(self) -> bool:
+        payload = disk_cache.get("nfl_data", self._snapshot_key)
+        if payload is None:
+            return False
+        try:
+            with timed_stage("restore_nfl_snapshot", season=self.season):
+                snapshot = FrameSnapshot(payload)
+                required = {*self._SNAPSHOT_FIELDS, "player_features", "defense_features"}
+                if not required.issubset(snapshot.names):
+                    raise ValueError("Incomplete NFL snapshot")
+                self._data_generation = snapshot.metadata["generation"]
+                self._snapshot = snapshot
+                self.data = SnapshotNFLData([self.season - 1, self.season], snapshot, self._SNAPSHOT_FIELDS)
+            return True
+        except Exception as error:
+            logger.warning("Invalid NFL snapshot; reloading data: %s", error)
+            return False
+
+    def _save_snapshot(self) -> None:
+        try:
+            frames = {name: getattr(self.data, name) for name in self._SNAPSHOT_FIELDS}
+            frames.update(player_features=self.player_df, defense_features=self.defense_df)
+            disk_cache.put("nfl_data", self._snapshot_key,
+                           encode_frames(frames, {"generation": self._data_generation}),
+                           ttl_seconds=6 * 3600, max_entries=4)
+        except Exception as error:
+            logger.warning("Cannot persist NFL snapshot; using memory: %s", error)
+
+    def _load_special_teams_data(self):
+        key = (self.season, self._data_generation)
+        payload = disk_cache.get("special_teams", key)
+        if payload is not None:
+            try:
+                frames, _ = decode_frames(payload)
+                if {"K", "DST"}.issubset(frames):
+                    return frames
+            except Exception as error:
+                logger.warning("Invalid special-teams snapshot; rebuilding: %s", error)
+        frames = load_special_teams_weekly([self.season - 1, self.season])
+        try:
+            disk_cache.put("special_teams", key, encode_frames(frames, {}),
+                           ttl_seconds=6 * 3600, max_entries=4)
+        except Exception as error:
+            logger.warning("Cannot persist special-teams snapshot: %s", error)
+        return frames
 
     def _get_position_service(
         self,
@@ -92,9 +166,7 @@ class WeeklyProjectionService:
             if normalized_position in {"K", "DST"}:
                 if self.special_teams_data is None:
                     self.special_teams_data = (
-                        load_special_teams_weekly(
-                            [self.season - 1, self.season]
-                        )
+                        self._load_special_teams_data()
                     )
 
                 self.position_services[normalized_position] = (

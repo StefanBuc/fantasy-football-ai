@@ -11,7 +11,7 @@ import type {
 } from '../types/api'
 
 const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ?? ''
+  import.meta.env?.VITE_API_BASE_URL ?? ''
 ).replace(/\/$/, '')
 
 function getErrorMessage(payload: unknown): string | null {
@@ -42,7 +42,20 @@ function getErrorMessage(payload: unknown): string | null {
   return null
 }
 
-async function postJson<TResponse>(
+const pendingRequests = new Map<string, Promise<unknown>>()
+
+function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+  const key = JSON.stringify([API_BASE_URL, path, body])
+  const existing = pendingRequests.get(key)
+  if (existing) return existing as Promise<TResponse>
+  const pending: Promise<TResponse> = sendJson<TResponse>(path, body).finally(() => {
+    if (pendingRequests.get(key) === pending) pendingRequests.delete(key)
+  })
+  pendingRequests.set(key, pending)
+  return pending
+}
+
+async function sendJson<TResponse>(
   path: string,
   body: unknown,
 ): Promise<TResponse> {

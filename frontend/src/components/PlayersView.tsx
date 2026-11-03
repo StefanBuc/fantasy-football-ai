@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { viewCache, viewKey } from '../lib/viewCache'
 
 import {
   getLeaguePlayers,
@@ -38,8 +39,12 @@ function healthLabel(player: LeaguePlayer): string | null {
     return null
   }
 
-  if (player.injury_status) {
-    return player.injury_status.replaceAll('_', ' ')
+  const status = player.injury_status?.trim()
+  const emptyStatus = !status || ['[]', '{}', 'NULL', 'NONE', 'NAN'].includes(
+    status.replaceAll(/\s/g, '').toUpperCase(),
+  )
+  if (!emptyStatus && status) {
+    return status.replaceAll('_', ' ')
   }
 
   return player.availability === 'unknown'
@@ -143,7 +148,9 @@ export function PlayersView({
   week,
   onWeekChange,
 }: PlayersViewProps) {
-  const [playerPool, setPlayerPool] = useState<LeaguePlayersResponse | null>(null)
+  const cacheKey = viewKey('players', connectionMode, league.league_id, league.season, week)
+  const [playerPool, setPlayerPool] = useState<LeaguePlayersResponse | null>(() => viewCache.read(cacheKey))
+  const requestVersion = useRef(0)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -153,6 +160,9 @@ export function PlayersView({
   const [sortBy, setSortBy] = useState<SortOption>('projection')
 
   const loadPlayers = useCallback(async () => {
+    const version = ++requestVersion.current
+    const saved = viewCache.read<LeaguePlayersResponse>(cacheKey)
+    setPlayerPool(saved)
     setIsLoading(true)
     setError(null)
 
@@ -164,25 +174,31 @@ export function PlayersView({
             season: league.season,
             week,
           })
+      if (version !== requestVersion.current) return
+      viewCache.write(cacheKey, result)
       setPlayerPool(result)
     } catch (caughtError) {
-      setPlayerPool(null)
+      if (version !== requestVersion.current) return
+      if (!saved) setPlayerPool(null)
       setError(
         caughtError instanceof Error
           ? caughtError.message
           : 'The ESPN player pool could not be loaded.',
       )
     } finally {
-      setIsLoading(false)
+      if (version === requestVersion.current) setIsLoading(false)
     }
-  }, [connectionMode, league.league_id, league.season, week])
+  }, [cacheKey, connectionMode, league.league_id, league.season, week])
 
   useEffect(() => {
     const requestTimer = window.setTimeout(() => {
       void loadPlayers()
     }, 0)
 
-    return () => window.clearTimeout(requestTimer)
+    return () => {
+      window.clearTimeout(requestTimer)
+      requestVersion.current += 1
+    }
   }, [loadPlayers])
 
   const nflTeams = useMemo(
@@ -368,6 +384,11 @@ export function PlayersView({
         </div>
       </div>
 
+      {isLoading && playerPool && (
+        <p role="status" className="mt-4 text-sm text-slate-500">
+          Checking for player updates. Showing saved results.
+        </p>
+      )}
       {error && (
         <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">
           <span className="font-black">Could not load players: </span>{error}

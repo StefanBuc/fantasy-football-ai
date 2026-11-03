@@ -1,10 +1,13 @@
 from collections import OrderedDict
-from dataclasses import dataclass
+from concurrent.futures import Future
+from dataclasses import dataclass, asdict
+import json
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from threading import Lock
 from typing import Callable
 from app.services.performance import logger, timed_stage
+from app.services.disk_cache import disk_cache
 
 from app.integrations.espn_roster_projection import (
     ESPNRosterPlayer,
@@ -34,14 +37,18 @@ class ESPNProjectionCache:
         self,
         ttl: timedelta = timedelta(hours=6),
         max_entries: int = 32,
+        persistent: bool = False,
     ) -> None:
         self.ttl = ttl
         self.max_entries = max_entries
+        self.persistent = persistent
         self._entries: OrderedDict[
             tuple[int, int, int, str],
             ESPNLeagueWeekProjection,
         ] = OrderedDict()
         self._lock = Lock()
+        self._pending: dict[tuple, Future] = {}
+        self._epoch = 0
 
     def get_or_create(
         self,
@@ -63,23 +70,80 @@ class ESPNProjectionCache:
             if entry is not None:
                 del self._entries[key]
 
-            logger.info("cache=espn_league result=miss season=%s week=%s", key[1], key[2])
-            with timed_stage("espn_league_projection", season=key[1], week=key[2]):
-                entry = builder()
-            self._entries[key] = entry
-            self._entries.move_to_end(key)
+            pending = self._pending.get(key)
+            owner = pending is None
+            if owner:
+                pending = Future()
+                self._pending[key] = pending
+            epoch = self._epoch
 
-            while len(self._entries) > self.max_entries:
-                self._entries.popitem(last=False)
+        if not owner:
+            return pending.result(), True
+        try:
+            entry, hit = self._load_or_build(key, builder)
+            with self._lock:
+                if epoch == self._epoch:
+                    if self.persistent and not hit:
+                        self._persist(key, entry)
+                    self._entries[key] = entry
+                    self._entries.move_to_end(key)
+                    while len(self._entries) > self.max_entries:
+                        self._entries.popitem(last=False)
+            pending.set_result(entry)
+            return entry, hit
+        except BaseException as error:
+            pending.set_exception(error)
+            raise
+        finally:
+            with self._lock:
+                if self._pending.get(key) is pending:
+                    self._pending.pop(key, None)
 
-            return entry, False
+    def _load_or_build(self, key, builder):
+        # No global lock during disk reads, data preparation, or inference.
+        if self.persistent:
+            payload = disk_cache.get("espn_projections", key)
+            if payload is not None:
+                try:
+                    data = json.loads(payload)
+                    entry = ESPNLeagueWeekProjection(
+                        generated_at=datetime.fromisoformat(data["generated_at"]),
+                        roster_week=data["roster_week"],
+                        team_projections={int(team): tuple(ESPNRosterProjection(**item) for item in players)
+                                          for team, players in data["team_projections"].items()},
+                    )
+                    if datetime.now(timezone.utc) - entry.generated_at < self.ttl:
+                        return entry, True
+                except Exception as error:
+                    logger.warning("Invalid cached ESPN projection; rebuilding: %s", error)
+        logger.info("cache=espn_league result=miss season=%s week=%s", key[1], key[2])
+        with timed_stage("espn_league_projection", season=key[1], week=key[2]):
+            return builder(), False
+
+    def _persist(self, key, entry):
+        try:
+            remaining = self.ttl.total_seconds() - (
+                datetime.now(timezone.utc) - entry.generated_at
+            ).total_seconds()
+            if remaining > 0:
+                disk_cache.put(
+                    "espn_projections", key,
+                    json.dumps(asdict(entry), default=lambda value: value.isoformat(),
+                               allow_nan=False).encode(), remaining, self.max_entries,
+                )
+        except Exception as error:
+            logger.warning("Cannot persist ESPN projection: %s", error)
 
     def clear(self) -> None:
         with self._lock:
+            self._epoch += 1
+            self._pending.clear()
             self._entries.clear()
+            if self.persistent:
+                disk_cache.clear("espn_projections")
 
 
-def roster_fingerprint(league) -> str:
+def roster_fingerprint(league, week: int | None = None) -> str:
     roster_rows: list[str] = []
 
     for team in sorted(
@@ -87,6 +151,9 @@ def roster_fingerprint(league) -> str:
         key=lambda item: int(item.team_id),
     ):
         for player in team.roster:
+            espn_projection = getattr(player, "projected_points", None)
+            if espn_projection is None and week is not None:
+                espn_projection = getattr(player, "stats", {}).get(week, {}).get("projected_points")
             roster_rows.append(
                 "|".join(
                     (
@@ -95,6 +162,7 @@ def roster_fingerprint(league) -> str:
                         str(player.name),
                         str(player.position).upper(),
                         str(player.lineupSlot),
+                        str(espn_projection),
                         str(
                             getattr(player, "proTeam", "")
                             or ""

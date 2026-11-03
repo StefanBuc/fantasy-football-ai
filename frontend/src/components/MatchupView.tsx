@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ProjectionFreshness } from './ProjectionFreshness'
+import { viewCache, viewKey } from '../lib/viewCache'
 
 import {
   getLocalMatchup,
@@ -239,12 +240,18 @@ export function MatchupView({
   onTeamChange,
   onWeekChange,
 }: MatchupViewProps) {
-  const [matchup, setMatchup] = useState<MatchupResponse | null>(null)
+  const cacheKey = viewKey('matchup', connectionMode, league.league_id, league.season, week, selectedTeamId)
+  const [matchup, setMatchup] = useState<MatchupResponse | null>(() => viewCache.read(cacheKey))
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const lastAutomaticRequest = useRef('')
+  const requestVersion = useRef(0)
+  const [isRefreshingData, setIsRefreshingData] = useState(false)
 
   const loadMatchup = useCallback(async (refresh = false) => {
+    const version = ++requestVersion.current
+    const saved = refresh ? null : viewCache.read<MatchupResponse>(cacheKey)
+    if (!refresh) setMatchup(saved)
+    setIsRefreshingData(refresh)
     setIsLoading(true)
     setError(null)
 
@@ -258,28 +265,30 @@ export function MatchupView({
             week,
             refresh,
           })
+      if (version !== requestVersion.current) return
+      if (refresh) viewCache.clear()
+      viewCache.write(cacheKey, result)
       setMatchup(result)
     } catch (caughtError) {
-      if (!refresh) setMatchup(null)
+      if (version !== requestVersion.current) return
+      if (!refresh && !saved) setMatchup(null)
       setError(
         caughtError instanceof Error
           ? caughtError.message
           : 'The matchup could not be loaded.',
       )
     } finally {
-      setIsLoading(false)
+      if (version === requestVersion.current) setIsLoading(false)
     }
-  }, [connectionMode, league.league_id, league.season, selectedTeamId, week])
+  }, [cacheKey, connectionMode, league.league_id, league.season, selectedTeamId, week])
 
   useEffect(() => {
-    const requestKey = `${selectedTeamId}:${week}`
-    if (lastAutomaticRequest.current === requestKey) {
-      return
+    const timer = window.setTimeout(() => { void loadMatchup() }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      requestVersion.current += 1
     }
-    lastAutomaticRequest.current = requestKey
-    setMatchup(null)
-    void loadMatchup()
-  }, [loadMatchup, selectedTeamId, week])
+  }, [loadMatchup])
 
   const homeTeam = league.teams.find(
     (team) => team.team_id === matchup?.home.team_id,
@@ -344,7 +353,9 @@ export function MatchupView({
         {isLoading && (
           <p role="status" className="mt-3 text-sm text-slate-500">
             {matchup
-              ? 'Refreshing NFL data and both lineups. Previous results remain visible.'
+              ? isRefreshingData
+                ? 'Refreshing NFL data and both lineups. Previous results remain visible.'
+                : 'Checking for matchup updates. Showing saved results.'
               : 'Loading both lineups. The first request can take longer while data and models load.'}
           </p>
         )}
@@ -377,6 +388,11 @@ export function MatchupView({
                 <p className="mt-2 text-4xl font-black tabular-nums text-lime-300">
                   {projectedTotal(matchup.away).toFixed(1)}
                 </p>
+                {matchup.away_win_pct !== null && (
+                  <p className="mt-2 text-sm font-bold text-white">
+                    {matchup.away_win_pct.toFixed(1)}% estimated win chance
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Projected</p>
@@ -387,8 +403,31 @@ export function MatchupView({
                 <p className="mt-2 text-4xl font-black tabular-nums text-lime-300">
                   {projectedTotal(matchup.home).toFixed(1)}
                 </p>
+                {matchup.home_win_pct !== null && (
+                  <p className="mt-2 text-sm font-bold text-white">
+                    {matchup.home_win_pct.toFixed(1)}% estimated win chance
+                  </p>
+                )}
               </div>
             </div>
+            {matchup.home_win_pct !== null && matchup.away_win_pct !== null && (
+              <div className="mt-5 flex h-2 overflow-hidden rounded-full bg-slate-700"
+                role="img" aria-label={`${matchup.away.team_name}: ${matchup.away_win_pct}% win chance; ${matchup.home.team_name}: ${matchup.home_win_pct}% win chance`}>
+                <div className="bg-lime-300" style={{ width: `${matchup.away_win_pct}%` }} />
+                <div className="bg-sky-400" style={{ width: `${matchup.home_win_pct}%` }} />
+              </div>
+            )}
+            <p className="mt-4 text-center text-xs leading-5 text-slate-400">
+              {matchup.home_win_pct !== null
+                ? 'Rough pregame estimate · Does not update with live scores'
+                : matchup.win_probability_note}
+            </p>
+            {matchup.home_win_pct !== null && (
+              <details className="mt-2 text-center text-xs leading-5 text-slate-400">
+                <summary className="cursor-pointer">How win chance is estimated</summary>
+                <p className="mt-2">{matchup.win_probability_note}</p>
+              </details>
+            )}
             {(matchup.away_score > 0 || matchup.home_score > 0) && (
               <p className="mt-5 text-center text-xs font-semibold text-slate-400">
                 ESPN score: {matchup.away_score.toFixed(1)}–{matchup.home_score.toFixed(1)}

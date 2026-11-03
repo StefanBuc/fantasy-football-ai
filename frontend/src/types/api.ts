@@ -69,6 +69,9 @@ export type TeamProjectionResponse = {
 }
 
 export type MatchupResponse = {
+  home_win_pct: number | null
+  away_win_pct: number | null
+  win_probability_note: string
   league_id: number
   league_name: string
   season: number
