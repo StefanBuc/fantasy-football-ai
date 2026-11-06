@@ -6,17 +6,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# CPU is portable; the optional GPU Compose override selects the CUDA wheels.
-ARG TORCH_VERSION=2.15.0
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt
-RUN python -m pip install --no-cache-dir --only-binary=:all: -r requirements.txt \
-    && python -m pip install --no-cache-dir "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}" \
+RUN python -m pip install --no-cache-dir --only-binary=:all: -r requirements.txt
+
+# Install CUDA-enabled PyTorch for GPU inference.
+ARG TORCH_VERSION=2.15.0
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu134
+RUN python -m pip install --no-cache-dir "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}" \
     && python -m pip check
 
 RUN useradd --create-home --uid 10001 appuser \

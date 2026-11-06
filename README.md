@@ -142,15 +142,15 @@ npm run build
 
 ## Docker setup
 
-Docker Desktop must be running with Linux containers. Use Compose 2.24 or newer for optional environment files. This runs a built React frontend through Nginx and a FastAPI backend, with CPU PyTorch 2.15 by default.
+Docker Desktop must be running with Linux containers. Use Compose 2.24 or newer for optional environment files. This runs a built React frontend through Nginx and a FastAPI backend, with CUDA-enabled PyTorch 2.15. The single `compose.yaml` requests your NVIDIA GPU by default. Windows GPU access requires Docker Desktop's WSL 2 backend and compatible NVIDIA drivers; see [Docker's GPU setup](https://docs.docker.com/desktop/features/gpu/).
 
 From the repository root:
 
 ```powershell
-docker compose up --build -d --wait
+docker compose up -d
 ```
 
-Open **http://localhost:8080**. API documentation is at **http://localhost:8000/docs**. The first image build downloads Python, Node, and PyTorch dependencies. Models and data still load on their first uncached request; Docker does not make that download instant.
+Open **http://localhost:8080** once the services are healthy (`docker compose ps`). API documentation is at **http://localhost:8000/docs**. Compose builds missing images automatically; the first build downloads Python, Node, and PyTorch's CUDA libraries. Models and data still load on their first uncached request; Docker does not make that download instant.
 
 The model directory `backend/models/pytorch/` must exist and contain the selected checkpoints. It is mounted read-only rather than copied into an image. Credentials are read at runtime from `backend/.env`, when present; `.env` files, model files, and caches are excluded from image builds. For the private-league button, configure that file as described below, including `ESPN_ENABLE_LOCAL_API=true`. The frontend build explicitly enables the local-league option.
 
@@ -168,14 +168,13 @@ docker compose down
 
 For a port conflict, set `$env:FRONTEND_PORT = '8081'` or `$env:BACKEND_PORT = '8001'` before starting Compose. For source changes, run `docker compose up --build -d --wait` again; this setup uses built images rather than development hot reload.
 
-An optional NVIDIA setup is included:
+The backend image is named `fantasy-football-ai-backend:gpu`. Models load lazily and select CUDA when available, otherwise CPU. To verify GPU access and run a CUDA operation:
 
 ```powershell
-docker compose -f compose.yaml -f compose.gpu.yaml up --build -d --wait
-docker compose -f compose.yaml -f compose.gpu.yaml exec backend python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+docker compose exec backend python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'; print(torch.cuda.get_device_name(0)); print(torch.ones(1, device='cuda').sum().item())"
 ```
 
-The override selects PyTorch's CUDA 13.4 wheels and requests the NVIDIA GPU. Windows GPU access requires Docker Desktop's WSL 2 backend and compatible NVIDIA drivers; see [Docker's GPU setup](https://docs.docker.com/desktop/features/gpu/). CPU mode works without GPU passthrough. To return to CPU, run the default Compose command with `--build` again.
+This Compose setup requires an NVIDIA GPU; local Python development can still use CPU when CUDA is unavailable. GPU acceleration applies to model inference; ESPN downloads, Parquet restoration, and pandas feature preparation still run on CPU.
 
 ## ESPN configuration
 
