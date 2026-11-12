@@ -8,6 +8,7 @@ from app.services.snapshot_nfl_data import SnapshotNFLData
 from app.services.disk_cache import disk_cache
 from app.services.result_cache import ResultCache
 from app.services.performance import logger, timed_stage
+from app.services.prediction_history import record_predictions
 
 from app.services.pytorch_inference import (
     PyTorchProjectionService,
@@ -59,8 +60,9 @@ class WeeklyProjectionService:
         if not restored:
             self._load_data(season)
             self._save_snapshot()
+        self.model_revision = model_fingerprint()
         self.generation = sha256(
-            f"{self._data_generation}:{model_fingerprint()}".encode()
+            f"{self._data_generation}:{self.model_revision}".encode()
         ).hexdigest()
 
         # Models stay lazy; cached projections need no checkpoint loading.
@@ -220,10 +222,20 @@ class WeeklyProjectionService:
 
         normalized_position = position.upper()
 
-        return self.weekly_cache.get_or_create(
+        result = self.weekly_cache.get_or_create(
             (self.season, week, normalized_position),
             lambda: self._project_week_uncached(week, normalized_position),
         )
+        record_predictions(
+            self, season=self.season, week=week, generated_at=result.generated_at,
+            samples=[{
+                "player_id": item.request.player_id, "player_name": item.request.player_name,
+                "position": item.position, "team": item.request.team,
+                "opponent_team": item.request.opponent_team, "predicted_points": item.predicted_points,
+                "projection_method": item.projection_method,
+            } for item in result.projections],
+        )
+        return result
 
     def _project_week_uncached(
         self,

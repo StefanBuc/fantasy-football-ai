@@ -54,13 +54,15 @@ def test_concurrent_requests_build_once():
 
 def test_weekly_service_keys_by_week_and_position():
     from app.services.weekly_projection_service import WeeklyProjectionService
+    from app.services.projection_types import ProjectionSlateResult
 
     service = object.__new__(WeeklyProjectionService)
     service.season = 2024
     service.weekly_cache = ResultCache()
-    service._project_week_uncached = Mock(return_value="projection")
+    result = ProjectionSlateResult(projections=[], skipped=[])
+    service._project_week_uncached = Mock(return_value=result)
     for week, position in ((1, "qb"), (1, "QB"), (2, "QB"), (1, "RB")):
-        assert service.project_week(week, position) == "projection"
+        assert service.project_week(week, position) == result
     assert service._project_week_uncached.call_count == 3
     with TestCase().assertRaises(ValueError):
         service.project_week(0, "QB")

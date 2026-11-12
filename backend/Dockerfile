@@ -20,7 +20,7 @@ RUN python -m pip install --no-cache-dir "torch==${TORCH_VERSION}" --index-url "
     && python -m pip check
 
 RUN useradd --create-home --uid 10001 appuser \
-    && mkdir -p /app/cache /app/models/pytorch \
+    && mkdir -p /app/cache /app/data /app/models/pytorch \
     && chown -R appuser:appuser /app
 
 COPY --chown=appuser:appuser app ./app

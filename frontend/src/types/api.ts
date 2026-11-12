@@ -149,3 +149,53 @@ export type LeaguePlayersInput = ConnectLeagueInput & {
 export type LocalLeaguePlayersInput = {
   week: number
 }
+
+export type AccuracyMetrics = {
+  saved: number
+  scored: number
+  pending: number
+  mae: number | null
+  bias: number | null
+}
+
+export type AccuracyRecord = {
+  season: number
+  week: number
+  player_id: string
+  player_name: string | null
+  position: string
+  team: string
+  opponent_team: string
+  predicted_points: number
+  actual_points: number | null
+  error: number | null
+  projection_method: string
+  model_version: string
+  model_revision: string
+  generated_at: string
+  recorded_at: string
+  kickoff: string
+  actual_updated_at: string | null
+}
+
+export type AccuracyReport = {
+  season: number
+  scoring: string
+  summary: AccuracyMetrics
+  by_position: (AccuracyMetrics & { position: string })[]
+  by_model: (AccuracyMetrics & { model_version: string; model_revision: string; projection_method: string })[]
+  weekly_trend: (AccuracyMetrics & { week: number })[]
+  records: AccuracyRecord[]
+  limit: number
+  offset: number
+}
+
+export type AccuracyQuery = {
+  season: number
+  league_id?: number
+  week?: number
+  position?: string
+  offset?: number
+}
+
+export type AccuracySyncResult = { updated_count: number; checked_count: number }

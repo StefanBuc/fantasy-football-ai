@@ -17,9 +17,10 @@ import { PlayersView } from './PlayersView'
 import { ThemeToggle } from './ThemeToggle'
 import { viewCache, viewKey } from '../lib/viewCache'
 import { ProjectionFreshness } from './ProjectionFreshness'
+import { AccuracyView } from './AccuracyView'
 
 export type ConnectionMode = 'public' | 'local'
-type DashboardView = 'team' | 'matchup' | 'players' | 'league'
+type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
@@ -441,6 +442,7 @@ export function LeagueDashboard({
             ['matchup', 'Matchup'],
             ['players', 'Players'],
             ['league', 'League'],
+            ['accuracy', 'Accuracy'],
           ] as const).map(([view, label]) => (
             <button
               key={view}
@@ -627,6 +629,8 @@ export function LeagueDashboard({
             connectionMode={connectionMode}
           />
         )}
+
+        {activeView === 'accuracy' && <AccuracyView league={league} />}
 
         {activeView === 'players' && (
           <PlayersView

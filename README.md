@@ -20,6 +20,7 @@ The application currently supports projections for quarterbacks, running backs, 
 - Produces labelled cold-start fallbacks for players with fewer than five games.
 - Builds time-safe unavailable-teammate opportunity features from injury reports.
 - Batches and caches a complete league's weekly projections for faster repeated requests.
+- Saves pregame projections permanently and compares them with published results in the Accuracy tab.
 - Includes automated tests for temporal history, defensive features, projection construction, player matching, ESPN routes, and API contracts.
 
 ## Architecture
@@ -157,6 +158,8 @@ The model directory `backend/models/pytorch/` must exist and contain the selecte
 Both services publish only on your computer's loopback address. The frontend shares the backend's network namespace so its API proxy connects through `127.0.0.1`; this preserves the existing private-league loopback check without trusting browser-supplied forwarded headers. This configuration is for local use. A public deployment needs authentication before enabling private-league routes.
 
 Docker cache data lives in the `projection-cache` named volume, separate from `backend/cache/`, and survives container rebuilds and `docker compose down`. Avoid `down --volumes` unless you want to delete that cache. The cache fingerprints use a consistent file order on Windows and Linux.
+
+Prediction history uses a separate `prediction-history` volume at `/app/data/predictions.sqlite3`. It survives cache expiry, refreshes, rebuilds, and normal `docker compose down`. `down --volumes` deletes this history as well as the cache; back up the history before removing volumes.
 
 Useful commands:
 
@@ -308,7 +311,24 @@ Set the `FANTASY_CACHE_PATH` environment variable before starting the backend to
 
 Matchup shows an estimated pregame win percentage for each team. It sums projected starter points and approximates their combined variability using up to 16 prior scoring games per offensive player, with position defaults for limited history, kickers, and D/ST. Short histories are shrunk toward the defaults. Bench and IR players are excluded; bye and confirmed unavailable players contribute zero. Missing starter projections produce an unavailable message instead of a misleading percentage.
 
-The calculation assumes independent player scores and a normal distribution of the scoring difference. It is a rough estimate, has not been validated against actual matchup outcomes, and does not incorporate live ESPN scores or game progress. Accuracy tracking and floor/ceiling projections remain future work.
+The calculation assumes independent player scores and a normal distribution of the scoring difference. It is a rough estimate, has not been validated against actual matchup outcomes, and does not incorporate live ESPN scores or game progress. Player-point accuracy tracking is available below; matchup-probability calibration and floor/ceiling projections remain future work.
+
+## Prediction accuracy tracking
+
+Open **Accuracy** in the connected league dashboard. Normal projection requests automatically save the points you viewed on My team, Matchup, and Players, including live injury adjustments. League history is separated by ESPN league ID. The regular weekly projection API and projection CLI save a separate weekly history. Predictions merely computed for other teams in the league cache are not saved until their pages are requested. Browser-only cached views need their normal background API request to complete before a new prediction can be saved.
+
+The latest saved projection for each player, position, season, and week is updated only before that player's scheduled kickoff, then frozen. Kickoffs use the schedule's Eastern time, including daylight-saving changes. Both generation time and recording time must precede kickoff. Postgame projections, byes, skipped/unmatched players, and games with unknown kickoff times are excluded. A cached pregame result can be saved while the game is still in the future. Tracking starts when this feature is installed; it does not manufacture a historical prediction record.
+
+Click **Sync results** after games to fetch published NFL stats. This download runs only on request, without loading models or rebuilding feature tables. Games must have published game scores and be at least 12 hours past kickoff. Offense uses `fantasy_points_ppr`, matching the model targets; K/DST use the same play-by-play scoring functions as training. These are the app's scoring rules, **not custom ESPN league scoring**. Missing or ambiguous player stats remain pending, including players with no stat row; missing data is never treated as a zero-point game. Subsequent syncs apply stat corrections. K/DST syncs may take longer because they download play-by-play data. A failed sync preserves saved history.
+
+The view includes projected versus actual points, mean absolute error (MAE), mean signed error (projected minus actual), per-position metrics, a weekly trend, and model/fallback groups. Only scored records enter error averages. Positive signed error means overprediction. Model labels and a checkpoint-set content fingerprint are saved with each prediction, alongside method, kickoff, generation, recording, and actual-update timestamps. The revision identifies the selected set of checkpoint files; fallbacks are labelled separately from model predictions. Small samples and pending results can make early averages unrepresentative.
+
+History is stored in `backend/data/predictions.sqlite3` locally, or the separate Docker volume above, with no TTL or cache pruning. Set `FANTASY_HISTORY_PATH` before starting the backend to choose another file. The directory is Git-ignored and excluded from Docker image builds. Back up the database while the backend is stopped. It contains NFL player projections and league-ID scopes, not ESPN credentials or fantasy-team names.
+
+API endpoints (season 2020 through the current year):
+
+- `GET /api/accuracy/{season}` reads history without NFL downloads. Optional `league_id` selects league history; omit it for weekly API history. Filters: `week`, `position` (`QB/RB/WR/TE/K/DST`), `limit` (1–200), `offset`. The weekly trend spans all weeks for the chosen position; other summary metrics honor the week filter.
+- `POST /api/accuracy/{season}/sync` fetches results for that season and optional `league_id` scope. It does not refresh projections or alter frozen forecasts. No history means no download.
 
 ## Tests
 
@@ -318,7 +338,7 @@ From `backend/`:
 python -m pytest tests -v
 ```
 
-The test suite covers time-aware player histories, pregame defense construction, roster and depth-chart selection, ESPN player matching, league projection caching, injury adjustment, and API response contracts.
+The test suite covers time-aware player histories, pregame defense construction, roster and depth-chart selection, ESPN player matching, league projection caching, injury adjustment, prediction-history persistence and kickoff locks, result reconciliation, and API response contracts.
 
 `backend/pytest.ini` limits default discovery to `tests/`, keeping the interactive legacy `xgb_test.py` training script out of collection.
 
@@ -333,7 +353,7 @@ The next planned work is:
 3. Add an automated weekly data refresh, evaluation, projection, and optional retraining pipeline.
 4. Add production deployment configuration, meaningful readiness checks, restricted CORS, HTTPS, logging, and monitoring.
 
-Additional modeling improvements include rolling-origin evaluation, formal PyTorch feature-importance analysis, uncertainty intervals, and monitoring prediction quality by position and week.
+Additional modeling improvements include rolling-origin evaluation, formal PyTorch feature-importance analysis, uncertainty intervals, matchup-probability calibration, and automated results synchronization.
 
 ## Security notes
 

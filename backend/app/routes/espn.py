@@ -1,4 +1,5 @@
 from typing import Any, Literal
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import requests as http_requests
@@ -36,6 +37,7 @@ from app.services.weekly_projection_service import (
     WeeklyProjectionService,
 )
 from app.services.projection_registry import projection_services
+from app.services.prediction_history import record_predictions
 from app.services.matchup_probability import estimate_win_chance
 from app.services.espn_connection_cache import espn_connection_cache
 from app.services.espn_projection_cache import (
@@ -342,6 +344,18 @@ def build_league_players_response(
     available_count = sum(
         player.roster_status == "available"
         for player in players
+    )
+
+    record_predictions(
+        service, season=season, week=week, scope=f"espn:{league_id}",
+        generated_at=datetime.now(timezone.utc),
+        samples=[{
+            "player_id": projections_by_id[player.espn_id].player_id,
+            "player_name": player.player_name, "position": player.position,
+            "team": player.team, "opponent_team": player.opponent_team,
+            "predicted_points": player.predicted_points,
+            "projection_method": player.projection_method,
+        } for player in players if player.projection_status == "projected" and not player.is_on_bye],
     )
 
     return ESPNLeaguePlayersResponse(
@@ -756,6 +770,13 @@ def build_team_projection_response(
     projected_count = sum(
         player.status == "projected"
         for player in players
+    )
+
+    record_predictions(
+        service, season=season, week=week, scope=f"espn:{league_id}",
+        generated_at=cached_projection.generated_at,
+        samples=[player.model_dump() for player in players
+                 if player.status == "projected" and not player.is_on_bye],
     )
 
     return ESPNTeamProjectionResponse(

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTeamProjections } from '../src/lib/api.ts'
+import { getTeamProjections, getAccuracy, syncAccuracy } from '../src/lib/api.ts'
 
 const input = { league_id: 1, season: 2026, team_id: 1, week: 8 }
 
@@ -26,4 +26,24 @@ test('failed requests can be retried', async (t) => {
   fetch.mock.mockImplementation(() => Promise.resolve(new Response('{}')))
   await getTeamProjections(input)
   assert.equal(fetch.mock.callCount(), 2)
+})
+
+test('accuracy reads use GET with filters and sync uses POST for the selected league', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))
+  await getAccuracy({ season: 2026, league_id: 123, week: 10, position: 'QB', offset: 100 })
+  const [path, options] = fetch.mock.calls[0].arguments
+  assert.equal(path, '/api/accuracy/2026?league_id=123&week=10&position=QB&offset=100')
+  assert.equal(options.method, 'GET')
+  assert.equal(options.body, undefined)
+  await syncAccuracy(2026, 123)
+  assert.equal(fetch.mock.calls[1].arguments[0], '/api/accuracy/2026/sync?league_id=123')
+  assert.equal(fetch.mock.calls[1].arguments[1].method, 'POST')
+})
+
+test('accuracy displays backend sync errors so saved data is not mistaken for empty history', async (t) => {
+  t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response(
+    JSON.stringify({ detail: 'Results could not be synced. Saved predictions are preserved; try again later.' }),
+    { status: 503 },
+  )))
+  await assert.rejects(syncAccuracy(2026), /Saved predictions are preserved/)
 })

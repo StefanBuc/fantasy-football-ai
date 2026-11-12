@@ -14,6 +14,7 @@ services:
         required: false
     environment:
       FANTASY_CACHE_PATH: /app/cache/runtime.sqlite3
+      FANTASY_HISTORY_PATH: /app/data/predictions.sqlite3
     deploy:
       resources:
         reservations:
@@ -23,6 +24,7 @@ services:
               capabilities: [gpu]
     volumes:
       - projection-cache:/app/cache
+      - prediction-history:/app/data
       - type: bind
         source: ./backend/models/pytorch
         target: /app/models/pytorch
@@ -58,3 +60,4 @@ services:
 
 volumes:
   projection-cache:
+  prediction-history:

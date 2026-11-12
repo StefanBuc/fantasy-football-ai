@@ -8,6 +8,7 @@ from app.routes.weeks import router as weeks_router
 from app.routes.metadata import router as metadata_router
 from app.routes.players import router as players_router
 from app.routes.espn import router as espn_router
+from app.routes.accuracy import router as accuracy_router
 
 app = FastAPI(
     title="Fantasy Football AI API",
@@ -50,3 +51,4 @@ app.include_router(weeks_router)
 app.include_router(metadata_router)
 app.include_router(players_router)
 app.include_router(espn_router)
+app.include_router(accuracy_router)
