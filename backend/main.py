@@ -1,4 +1,6 @@
 from time import perf_counter
+from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, Request
 from app.services.performance import logger
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,10 +11,23 @@ from app.routes.metadata import router as metadata_router
 from app.routes.players import router as players_router
 from app.routes.espn import router as espn_router
 from app.routes.accuracy import router as accuracy_router
+from app.services.accuracy_scheduler import AccuracyScheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = AccuracyScheduler()
+    scheduler.start()
+    app.state.accuracy_scheduler = scheduler
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(scheduler.stop)
 
 app = FastAPI(
     title="Fantasy Football AI API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

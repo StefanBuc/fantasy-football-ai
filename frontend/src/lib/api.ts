@@ -2,6 +2,9 @@ import type {
   AccuracyQuery,
   AccuracyReport,
   AccuracySyncResult,
+  AutomationStatus,
+  LiveScoreResponse,
+  LivePlayerDescriptor,
   ConnectLeagueInput,
   ESPNLeague,
   LeaguePlayersInput,
@@ -194,4 +197,16 @@ export function getAccuracy(input: AccuracyQuery): Promise<AccuracyReport> {
 export function syncAccuracy(season: number, leagueId?: number): Promise<AccuracySyncResult> {
   const query = leagueId === undefined ? '' : `?league_id=${leagueId}`
   return postJson<AccuracySyncResult>(`/api/accuracy/${season}/sync${query}`, {})
+}
+
+export function getAutomationStatus(season: number, leagueId?: number): Promise<AutomationStatus> {
+  const query = leagueId === undefined ? '' : `?league_id=${leagueId}`
+  return sendJson<AutomationStatus>(`/api/accuracy/${season}/automation${query}`, undefined, 'GET')
+}
+
+export function getLiveScores(input: { league_id: number; season: number; week: number;
+  players: LivePlayerDescriptor[] }, mode: 'public' | 'local'): Promise<LiveScoreResponse> {
+  const { week, players } = input
+  return postJson<LiveScoreResponse>(mode === 'local' ? '/api/espn/local/live' : '/api/espn/live',
+    mode === 'local' ? { week, players } : input)
 }

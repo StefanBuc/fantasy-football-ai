@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getAccuracy, syncAccuracy } from '../lib/api'
-import type { AccuracyReport, ESPNLeague } from '../types/api'
+import { getAccuracy, syncAccuracy, getAutomationStatus } from '../lib/api'
+import type { AccuracyReport, ESPNLeague, AutomationStatus } from '../types/api'
+import { AccuracyAutomation } from './AccuracyAutomation'
 
 const positions = ['QB', 'RB', 'WR', 'TE', 'K', 'DST']
 const weeks = Array.from({ length: 18 }, (_, i) => i + 1)
@@ -23,7 +24,8 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
   const [position, setPosition] = useState('')
   const [offset, setOffset] = useState(0)
   const [reload, setReload] = useState(0)
-  const [loaded, setLoaded] = useState<{ key: string; report: AccuracyReport | null; error: string | null } | null>(null)
+  const [loaded, setLoaded] = useState<{ key: string; report: AccuracyReport | null; error: string | null;
+    automation: AutomationStatus | null; automationError: string | null } | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -35,12 +37,25 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
 
   useEffect(() => {
     let cancelled = false
-    getAccuracy({ season, league_id: leagueId, week: week ? Number(week) : undefined,
-      position: position || undefined, offset })
-      .then((result) => { if (!cancelled) setLoaded({ key: requestKey, report: result, error: null }) })
-      .catch((caught) => { if (!cancelled) setLoaded({ key: requestKey, report: null,
-        error: caught instanceof Error ? caught.message : 'Could not load history.' }) })
-    return () => { cancelled = true }
+    let pending = false
+    async function load() {
+      if (pending) return
+      pending = true
+      const [history, automation] = await Promise.allSettled([
+        getAccuracy({ season, league_id: leagueId, week: week ? Number(week) : undefined,
+          position: position || undefined, offset }), getAutomationStatus(season, leagueId),
+      ])
+      if (!cancelled) setLoaded({ key: requestKey,
+        report: history.status === 'fulfilled' ? history.value : null,
+        error: history.status === 'rejected' ? history.reason instanceof Error ? history.reason.message : 'Could not load history.' : null,
+        automation: automation.status === 'fulfilled' ? automation.value : null,
+        automationError: automation.status === 'rejected' ? 'Automatic tracking status could not be loaded. History is still available.' : null,
+      })
+      pending = false
+    }
+    void load()
+    const timer = window.setInterval(() => { void load() }, 60_000)
+    return () => { cancelled = true; window.clearInterval(timer) }
   }, [requestKey, season, leagueId, week, position, offset])
 
   async function sync() {
@@ -95,8 +110,8 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-500">History
             <select value={source} disabled={syncing} onChange={(event) => { setSource(event.target.value); resetPage() }} className={selectClass}>
-              <option value="league">This league's viewed projections</option>
-              <option value="weekly">Weekly API projections</option>
+              <option value="league">This league's projections</option>
+              <option value="weekly">Weekly NFL projections</option>
             </select>
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-500">Week
@@ -112,8 +127,10 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
             </select>
           </label>
         </div>
-        <p className="mt-4 text-xs leading-5 text-slate-500">{report?.scoring ?? 'Full PPR offense; app K/DST scoring. Custom ESPN scoring may differ.'} League history includes injury adjustments shown when you viewed a roster, matchup, or player page. Sync after published stats arrive; this can take longer for K/DST. Missing stats stay pending.</p>
+        <p className="mt-4 text-xs leading-5 text-slate-500">{report?.scoring ?? 'Full PPR offense; app K/DST scoring. Custom ESPN scoring may differ.'} League history includes injury adjustments from scheduled captures and viewed pages. You can also sync manually after published stats arrive; this can take longer for K/DST. Missing stats stay pending.</p>
       </section>
+
+      {!loading && <AccuracyAutomation status={loaded?.automation ?? null} error={loaded?.automationError ?? null} />}
 
       {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error} <button type="button" onClick={refreshHistory} className="ml-2 font-bold underline">Retry history</button></p>}
       {notice && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">{notice}</p>}
@@ -132,7 +149,7 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
 
         {report.summary.saved === 0 ? <section className={`${panelClass} py-12 text-center`}>
           <h2 className="text-lg font-black">No saved predictions for these filters yet</h2>
-          <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">Open My team, Matchup, or Players before games start to save league projections. Tracking starts from now; past projections cannot be reconstructed fairly.</p>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">Keep the backend running before games for automatic captures, or open My team, Matchup, or Players to save projections yourself. Tracking starts from now; past projections cannot be reconstructed fairly.</p>
         </section> : <>
           <div className="grid gap-5 lg:grid-cols-2">
             <section className={panelClass}>

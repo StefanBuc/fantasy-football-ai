@@ -4,11 +4,13 @@ from threading import Lock
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query
+from filelock import Timeout
 
-from app.schemas.accuracy import AccuracyPosition, AccuracyReport, SyncResult
+from app.schemas.accuracy import AccuracyPosition, AccuracyReport, SyncResult, AutomationStatus
 from app.services.prediction_history import prediction_history
 from app.services.prediction_actuals import sync_actuals
 from app.services.performance import logger
+from app.services.accuracy_jobs import accuracy_jobs, operation_lock, run_tracked_sync
 
 router = APIRouter(prefix="/api/accuracy", tags=["accuracy"])
 Season = Annotated[int, Path(ge=2020, le=date.today().year)]
@@ -38,9 +40,21 @@ def sync_results(season: Season, league_id: League = None):
     if not sync_lock.acquire(blocking=False):
         raise HTTPException(409, "A results sync is already running. Try again when it finishes.")
     try:
-        return sync_actuals(prediction_history, season, history_scope(league_id))
+        with operation_lock():
+            scope = history_scope(league_id)
+            return run_tracked_sync(season, scope, lambda: sync_actuals(prediction_history, season, scope))
+    except Timeout as error:
+        raise HTTPException(409, "An automatic capture or results sync is running. Try again when it finishes.") from error
     except Exception as error:
         logger.warning("Prediction results sync failed: %s", error)
         raise HTTPException(503, "Results could not be synced. Saved predictions are preserved; try again later.") from error
     finally:
         sync_lock.release()
+
+
+@router.get("/{season}/automation", response_model=AutomationStatus)
+def get_automation_status(season: Season, league_id: League = None):
+    try:
+        return accuracy_jobs.status(season, history_scope(league_id))
+    except (OSError, sqlite3.Error) as error:
+        raise HTTPException(503, "Automatic tracking status could not be read.") from error

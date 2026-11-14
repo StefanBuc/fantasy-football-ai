@@ -62,3 +62,29 @@ class AccuracyReport(BaseModel):
 class SyncResult(BaseModel):
     updated_count: int
     checked_count: int
+
+
+class AutomationJob(BaseModel):
+    week: int | None
+    state: Literal["running", "success", "error"]
+    last_started_at: str | None
+    last_finished_at: str | None
+    last_success_at: str | None
+    last_error: str | None
+    next_run_at: str | None
+    result: dict[str, int] | None
+
+
+class AutomationStatus(BaseModel):
+    enabled: bool
+    registered: bool
+    capture_enabled: bool
+    note: str
+    last_checked_at: str | None
+    worker_error: str | None
+    capture: AutomationJob | None
+    sync: AutomationJob | None
+    poll_seconds: int
+    capture_interval_minutes: int
+    capture_window_hours: int
+    sync_interval_hours: int

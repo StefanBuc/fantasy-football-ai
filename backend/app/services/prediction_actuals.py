@@ -11,7 +11,14 @@ from app.services.prediction_history import game_times, normalize_team, utc_now
 from app.services.special_teams_data import load_special_teams_weekly
 
 
-def reconcile(history, season, scope, schedule, weekly, special, now=None):
+def next_morning(kickoff):
+    kickoff = pd.Timestamp(kickoff)
+    eastern_date = kickoff.tz_convert("America/New_York").date() + timedelta(days=1)
+    morning = pd.Timestamp(f"{eastern_date} 08:00").tz_localize("America/New_York").tz_convert("UTC")
+    return max(kickoff + timedelta(hours=12), morning).to_pydatetime()
+
+
+def reconcile(history, season, scope, schedule, weekly, special, now=None, automatic=False):
     now = now or utc_now()
     rows = history.rows(season, scope)
     games_by_week = {week: game_times(schedule, season, week) for week in {row["week"] for row in rows}}
@@ -53,6 +60,8 @@ def reconcile(history, season, scope, schedule, weekly, special, now=None):
         # deliberately not live scoring: incomplete games/stat feeds stay pending.
         if opponent != row["opponent_team"] or now < kickoff + timedelta(hours=12):
             continue
+        if automatic and now < next_morning(kickoff):
+            continue
         if any(datetime.fromisoformat(row[key]) >= kickoff for key in ("recorded_at", "generated_at")):
             continue
         if any(pd.isna(source.get(key)) for key in ("home_score", "away_score", "result")):
@@ -67,7 +76,7 @@ def reconcile(history, season, scope, schedule, weekly, special, now=None):
     return {"updated_count": changed, "checked_count": len(results)}
 
 
-def sync_actuals(history, season, scope):
+def sync_actuals(history, season, scope, automatic=False):
     rows = history.rows(season, scope)
     if not rows:
         return {"updated_count": 0, "checked_count": 0}
@@ -79,6 +88,7 @@ def sync_actuals(history, season, scope):
         eligible.extend(row for row in rows if row["week"] == week
                         and row["team"] in games
                         and now >= games[row["team"]][1] + timedelta(hours=12)
+                        and (not automatic or now >= next_morning(games[row["team"]][1]))
                         and all(pd.notna(games[row["team"]][2].get(key))
                                 for key in ("home_score", "away_score", "result")))
     if not eligible:
@@ -87,4 +97,4 @@ def sync_actuals(history, season, scope):
     weekly = (NFLData([season])._load_weekly_player_data()
               if positions & {"QB", "RB", "WR", "TE"} else pd.DataFrame())
     special = load_special_teams_weekly([season]) if positions & {"K", "DST"} else {}
-    return reconcile(history, season, scope, schedule, weekly, special, now=now)
+    return reconcile(history, season, scope, schedule, weekly, special, now=now, automatic=automatic)

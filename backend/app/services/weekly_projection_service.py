@@ -1,6 +1,7 @@
 from typing import cast
 from uuid import uuid4
 from hashlib import sha256
+from time import monotonic
 from app.services.data_snapshot import (
     source_fingerprint, model_fingerprint, encode_frames, decode_frames, FrameSnapshot,
 )
@@ -9,6 +10,7 @@ from app.services.disk_cache import disk_cache
 from app.services.result_cache import ResultCache
 from app.services.performance import logger, timed_stage
 from app.services.prediction_history import record_predictions
+from app.services.projection_ranges import checkpoint_hashes
 
 from app.services.pytorch_inference import (
     PyTorchProjectionService,
@@ -61,6 +63,7 @@ class WeeklyProjectionService:
             self._load_data(season)
             self._save_snapshot()
         self.model_revision = model_fingerprint()
+        self.model_hashes = checkpoint_hashes()
         self.generation = sha256(
             f"{self._data_generation}:{self.model_revision}".encode()
         ).hexdigest()
@@ -73,6 +76,7 @@ class WeeklyProjectionService:
         self.weekly_cache = ResultCache[ProjectionSlateResult](
             name="weekly", persistent_key=self.generation,
         )
+        self.loaded_at = monotonic()
 
     def _load_data(self, season: int) -> None:
         for stage, loader in (

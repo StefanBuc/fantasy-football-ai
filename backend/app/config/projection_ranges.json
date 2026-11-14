@@ -1,0 +1,163 @@
+{
+  "format_version": 1,
+  "season": 2025,
+  "calibration_through_week": 12,
+  "created_at": "2026-11-14T07:10:01.589572+00:00",
+  "positions": {
+    "QB": {
+      "checkpoint_sha256": "3b595702532150b623e21623aaf5161e0c3fa56c5edf2d1a28a5ff6b6aff8698",
+      "methods": {
+        "recent_average": {
+          "ready": true,
+          "low_offset": -10.679333265622455,
+          "high_offset": 12.573999671638015,
+          "calibration_count": 198,
+          "validation_count": 59,
+          "validation_coverage": 0.8983050847457628,
+          "target_coverage": 0.8
+        },
+        "model": {
+          "ready": true,
+          "low_offset": -11.19616801738739,
+          "high_offset": 10.777308464050293,
+          "calibration_count": 160,
+          "validation_count": 166,
+          "validation_coverage": 0.8132530120481928,
+          "target_coverage": 0.8
+        },
+        "position_average": {
+          "ready": false,
+          "calibration_count": 38,
+          "validation_count": 9
+        }
+      }
+    },
+    "RB": {
+      "checkpoint_sha256": "4317b118070d5c973f2c081acc3648d12d1f8902009c4d67de177cfa48d8fe25",
+      "methods": {
+        "recent_average": {
+          "ready": true,
+          "low_offset": -4.665000319480895,
+          "high_offset": 8.92666632334392,
+          "calibration_count": 450,
+          "validation_count": 66,
+          "validation_coverage": 0.9090909090909091,
+          "target_coverage": 0.8
+        },
+        "model": {
+          "ready": true,
+          "low_offset": -5.781926941871643,
+          "high_offset": 9.677264869213106,
+          "calibration_count": 437,
+          "validation_count": 471,
+          "validation_coverage": 0.8089171974522293,
+          "target_coverage": 0.8
+        },
+        "position_average": {
+          "ready": false,
+          "calibration_count": 49,
+          "validation_count": 7
+        }
+      }
+    },
+    "WR": {
+      "checkpoint_sha256": "aa57d3e156c397f130e74aaa2cb364155d1391d2dc82cde39a514f158cfc352f",
+      "methods": {
+        "recent_average": {
+          "ready": true,
+          "low_offset": -6.099999976158142,
+          "high_offset": 8.073333740234377,
+          "calibration_count": 745,
+          "validation_count": 103,
+          "validation_coverage": 0.8737864077669902,
+          "target_coverage": 0.8
+        },
+        "position_average": {
+          "ready": false,
+          "calibration_count": 74,
+          "validation_count": 17
+        },
+        "model": {
+          "ready": true,
+          "low_offset": -5.295103073120117,
+          "high_offset": 10.258430290222176,
+          "calibration_count": 679,
+          "validation_count": 743,
+          "validation_coverage": 0.845222072678331,
+          "target_coverage": 0.8
+        }
+      }
+    },
+    "TE": {
+      "checkpoint_sha256": "d687f79d6af564b5131771af6a9f41b3503cc63498b0a25cb2dfee0d0bc06e71",
+      "methods": {
+        "recent_average": {
+          "ready": true,
+          "low_offset": -5.133333524068197,
+          "high_offset": 7.624999791383743,
+          "calibration_count": 401,
+          "validation_count": 52,
+          "validation_coverage": 0.9807692307692307,
+          "target_coverage": 0.8
+        },
+        "model": {
+          "ready": true,
+          "low_offset": -5.570486068725586,
+          "high_offset": 6.8049098968505914,
+          "calibration_count": 313,
+          "validation_count": 384,
+          "validation_coverage": 0.8203125,
+          "target_coverage": 0.8
+        },
+        "position_average": {
+          "ready": false,
+          "calibration_count": 51,
+          "validation_count": 10
+        }
+      }
+    },
+    "K": {
+      "checkpoint_sha256": "a0e03a0521db515d81335d4495c702f85598496e78a2bc7b9e60e9a05018f6ec",
+      "methods": {
+        "recent_average": {
+          "ready": false,
+          "calibration_count": 149,
+          "validation_count": 13
+        },
+        "model": {
+          "ready": true,
+          "low_offset": -5.757345390319824,
+          "high_offset": 6.501445960998535,
+          "calibration_count": 165,
+          "validation_count": 166,
+          "validation_coverage": 0.8192771084337349,
+          "target_coverage": 0.8
+        },
+        "position_average": {
+          "ready": false,
+          "calibration_count": 10,
+          "validation_count": 2
+        }
+      }
+    },
+    "DST": {
+      "checkpoint_sha256": "787919b5b996437db07ea6b0d2b1cad36ccbae6b8917d9cd8230a375314f63cb",
+      "methods": {
+        "recent_average": {
+          "ready": false,
+          "calibration_count": 128,
+          "validation_count": 0
+        },
+        "model": {
+          "ready": true,
+          "low_offset": -6.709949612617493,
+          "high_offset": 9.134478688240051,
+          "calibration_count": 196,
+          "validation_count": 188,
+          "validation_coverage": 0.8191489361702128,
+          "target_coverage": 0.8
+        }
+      }
+    }
+  }
+}

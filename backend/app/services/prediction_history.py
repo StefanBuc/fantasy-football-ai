@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.config.model_config import SELECTED_PYTORCH_MODEL_VERSIONS
 from app.services.performance import logger
+from app.services.projection_ranges import estimate_range
 
 
 SCORING = "Full PPR for QB/RB/WR/TE; app K/DST scoring (not custom ESPN scoring)."
@@ -68,23 +69,34 @@ class PredictionHistory:
                 actual_points REAL, actual_updated_at TEXT,
                 PRIMARY KEY(scope, season, week, position, player_id)
             )""")
+            range_columns = {"floor_points": "REAL", "ceiling_points": "REAL",
+                             "range_note": "TEXT", "range_revision": "TEXT"}
+            existing = {row[1] for row in connection.execute("PRAGMA table_info(predictions)")}
+            if not set(range_columns).issubset(existing):
+                with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    existing = {row[1] for row in connection.execute("PRAGMA table_info(predictions)")}
+                    for name, kind in range_columns.items():
+                        if name not in existing:
+                            connection.execute(f"ALTER TABLE predictions ADD COLUMN {name} {kind}")
             with connection:
                 yield connection
         finally:
             connection.close()
 
     def record(self, *, season, week, samples, schedule, generated_at,
-               model_revision, scope="weekly"):
+               model_revision, scope="weekly", model_hashes=None):
         games = game_times(schedule, season, week)
         if not games or generated_at.tzinfo is None:
-            return
+            return 0
         # Take the clock after acquiring the write lock, not before waiting for it.
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             now = utc_now()
             generated_at = generated_at.astimezone(timezone.utc)
             if generated_at > now:
-                return
+                return 0
+            saved = 0
             for sample in samples:
                 position = sample["position"].upper().replace("D/ST", "DST")
                 player_id = sample.get("player_id")
@@ -100,16 +112,22 @@ class PredictionHistory:
                     continue
                 if position == "DST":
                     player_id = normalize_team(player_id)
+                bounds = estimate_range(points, position, sample.get("projection_method") or "model", model_hashes or {})
+                if sample.get("is_on_bye") or sample.get("availability") == "unavailable":
+                    bounds.update(floor_points=None, ceiling_points=None,
+                                  range_note="Range unavailable for an availability-adjusted projection.")
                 values = (
                     scope, season, week, str(player_id), sample.get("player_name"), position,
                     team, opponent, float(points), sample.get("projection_method") or "model",
                     f"{position}_model_v{SELECTED_PYTORCH_MODEL_VERSIONS[position]}",
                     model_revision, generated_at.isoformat(), now.isoformat(), kickoff.isoformat(),
+                    bounds["floor_points"], bounds["ceiling_points"], bounds["range_note"], bounds["range_revision"],
                 )
-                connection.execute("""INSERT INTO predictions (
+                cursor = connection.execute("""INSERT INTO predictions (
                     scope, season, week, player_id, player_name, position, team, opponent_team,
                     predicted_points, projection_method, model_version, model_revision,
-                    generated_at, recorded_at, kickoff) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    generated_at, recorded_at, kickoff, floor_points, ceiling_points, range_note, range_revision)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(scope,season,week,position,player_id) DO UPDATE SET
                         player_name=excluded.player_name, team=excluded.team,
                         opponent_team=excluded.opponent_team,
@@ -117,10 +135,14 @@ class PredictionHistory:
                         projection_method=excluded.projection_method,
                         model_version=excluded.model_version, model_revision=excluded.model_revision,
                         generated_at=excluded.generated_at, recorded_at=excluded.recorded_at,
-                        kickoff=excluded.kickoff
+                        kickoff=excluded.kickoff, floor_points=excluded.floor_points,
+                        ceiling_points=excluded.ceiling_points, range_note=excluded.range_note,
+                        range_revision=excluded.range_revision
                     WHERE predictions.kickoff > excluded.recorded_at
                         AND predictions.generated_at <= excluded.generated_at
                         AND predictions.actual_points IS NULL""", values)
+                saved += cursor.rowcount
+            return saved
 
     def rows(self, season, scope):
         with self.connect() as connection:
@@ -128,6 +150,11 @@ class PredictionHistory:
                 "SELECT * FROM predictions WHERE season=? AND scope=? ORDER BY week DESC, position, player_id",
                 (season, scope),
             )]
+
+    def week_records(self, season, week, scope):
+        with self.connect() as connection:
+            return {(row["position"], row["player_id"]): dict(row) for row in connection.execute(
+                "SELECT * FROM predictions WHERE season=? AND week=? AND scope=?", (season, week, scope))}
 
     def update_actuals(self, results):
         with self.connect() as connection:
@@ -174,15 +201,21 @@ prediction_history = PredictionHistory(Path(os.environ.get(
 )))
 
 
-def record_predictions(service, *, season, week, samples, generated_at, scope="weekly"):
+def record_predictions(service, *, season, week, samples, generated_at, scope="weekly",
+                       strict=False, schedule=None):
     """History failure should not hide usable projections; reads surface DB errors."""
     if not samples:
-        return
+        return 0
     try:
-        prediction_history.record(
+        return prediction_history.record(
             season=season, week=week, samples=samples,
-            schedule=getattr(getattr(service, "data", None), "schedule", None), generated_at=generated_at,
+            schedule=(schedule if schedule is not None else
+                      getattr(getattr(service, "data", None), "schedule", None)), generated_at=generated_at,
             model_revision=getattr(service, "model_revision", "unknown"), scope=scope,
+            model_hashes=getattr(service, "model_hashes", {}),
         )
     except (OSError, sqlite3.Error) as error:
+        if strict:
+            raise
         logger.warning("Cannot save prediction history: %s", error)
+        return 0
