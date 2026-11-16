@@ -11,6 +11,7 @@ export type ESPNTeamSummary = {
   points_against: number
   streak: string | null
   playoff_pct: number | null
+  opponents_by_week?: Record<string, number | null>
 }
 
 export type ESPNLeague = {
@@ -78,6 +79,7 @@ export type TeamProjectionResponse = {
 }
 
 export type MatchupResponse = {
+  opponents_by_team?: Record<string, number | null>
   home_win_pct: number | null
   away_win_pct: number | null
   win_probability_note: string

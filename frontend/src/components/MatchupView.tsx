@@ -4,6 +4,7 @@ import { viewCache, viewKey } from '../lib/viewCache'
 import { PlayerScore, LiveScoreNote } from './PlayerScore'
 import { useLiveScores } from '../lib/useLiveScores'
 import { teamScoreDisplay } from '../lib/scoreDisplay'
+import { matchupOptions } from '../lib/matchupOptions'
 
 import {
   getLocalMatchup,
@@ -302,6 +303,14 @@ export function MatchupView({
   const awayTeam = league.teams.find(
     (team) => team.team_id === matchup?.away.team_id,
   )
+  const options = matchupOptions(
+    league.teams,
+    week,
+    matchup?.week === week ? matchup.opponents_by_team : undefined,
+  )
+  const selectedMatchup = options.find(
+    (option) => option.teamId === selectedTeamId || option.opponentId === selectedTeamId,
+  )
 
   return (
     <>
@@ -319,17 +328,18 @@ export function MatchupView({
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-[200px_130px_auto]">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(220px,1fr)_110px_auto] lg:max-w-2xl">
             <select
-              value={selectedTeamId}
+              value={selectedMatchup?.teamId ?? selectedTeamId}
               disabled={isLoading}
               onChange={(event) => onTeamChange(Number(event.target.value))}
-              aria-label="Fantasy team"
-              className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500"
+              aria-label="Fantasy matchup"
+              title={selectedMatchup?.label}
+              className="h-11 min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500"
             >
-              {league.teams.map((team) => (
-                <option key={team.team_id} value={team.team_id}>
-                  {team.team_name}
+              {options.map((option) => (
+                <option key={option.teamId} value={option.teamId} disabled={option.disabled}>
+                  {option.label}
                 </option>
               ))}
             </select>
