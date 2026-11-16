@@ -14,6 +14,8 @@ import type {
 import type { ConnectionMode } from './LeagueDashboard'
 import { PlayerScore, LiveScoreNote } from './PlayerScore'
 import { useLiveScores } from '../lib/useLiveScores'
+import { sortPlayers } from '../lib/playerSorting'
+import type { PlayerSortOption } from '../lib/playerSorting'
 
 type PlayersViewProps = {
   league: ESPNLeague
@@ -23,7 +25,6 @@ type PlayersViewProps = {
 }
 
 type RosterFilter = 'all' | 'available' | 'rostered'
-type SortOption = 'projection' | 'season_average'
 
 const positions = ['ALL', 'QB', 'RB', 'WR', 'TE', 'FLEX', 'D/ST', 'K'] as const
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
@@ -153,7 +154,7 @@ export function PlayersView({
   const [position, setPosition] = useState<(typeof positions)[number]>('ALL')
   const [rosterFilter, setRosterFilter] = useState<RosterFilter>('available')
   const [team, setTeam] = useState('ALL')
-  const [sortBy, setSortBy] = useState<SortOption>('projection')
+  const [sortBy, setSortBy] = useState<PlayerSortOption>('projection')
 
   const loadPlayers = useCallback(async () => {
     const version = ++requestVersion.current
@@ -231,27 +232,12 @@ export function PlayersView({
           && matchesRoster
           && matchesTeam
       })
-      .sort((left, right) => {
-        const primaryDifference = sortBy === 'projection'
-          ? (
-              (right.predicted_points ?? Number.NEGATIVE_INFINITY)
-              - (left.predicted_points ?? Number.NEGATIVE_INFINITY)
-            )
-          : (
-              (right.season_average ?? Number.NEGATIVE_INFINITY)
-              - (left.season_average ?? Number.NEGATIVE_INFINITY)
-            )
-
-        if (primaryDifference !== 0) {
-          return primaryDifference
-        }
-
-        return left.player_name.localeCompare(right.player_name)
-      }) ?? []
-  }, [playerPool, position, rosterFilter, search, sortBy, team])
+      ?? []
+  }, [playerPool, position, rosterFilter, search, team])
 
   const live = useLiveScores(league.league_id, league.season, week, connectionMode,
     playerPool?.week === week ? filteredPlayers : [])
+  const sortedPlayers = sortPlayers(filteredPlayers, sortBy, live.scores)
 
   return (
     <section>
@@ -360,11 +346,12 @@ export function PlayersView({
             <span className="sr-only">Sort players</span>
             <select
               value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as SortOption)}
+              onChange={(event) => setSortBy(event.target.value as PlayerSortOption)}
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-900 outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             >
               <option value="projection">Sort: AI projection</option>
               <option value="season_average">Sort: Season average</option>
+              <option value="current_score">Sort: Current score</option>
             </select>
           </label>
         </div>
@@ -410,7 +397,9 @@ export function PlayersView({
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 {sortBy === 'projection'
                   ? `Sorted by highest AI projection for Week ${week}`
-                  : 'Sorted by highest season average'}
+                  : sortBy === 'current_score'
+                    ? `Sorted by highest ESPN live/final score for Week ${week}`
+                    : 'Sorted by highest season average'}
               </p>
             </div>
             <p className="text-sm font-black text-slate-500 dark:text-slate-300">
@@ -428,7 +417,7 @@ export function PlayersView({
           </div>
 
           {filteredPlayers.length > 0 ? (
-            filteredPlayers.map((player) => (
+            sortedPlayers.map((player) => (
               <PlayerPoolRow key={player.espn_id} player={player} live={live.scores.get(player.espn_id)} />
             ))
           ) : (

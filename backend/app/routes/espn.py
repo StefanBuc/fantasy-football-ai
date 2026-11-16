@@ -1,5 +1,6 @@
 from typing import Any, Literal
 from datetime import datetime, timezone
+import json
 from urllib.parse import urlparse
 
 import requests as http_requests
@@ -29,6 +30,7 @@ from app.schemas.espn import (
     ESPNLocalTeamProjectionRequest,
     ESPNMatchupResponse,
     ESPNScoreboardMatchup,
+    ESPNScoreboardResponse,
     ESPNRosterProjectionResponse,
     ESPNTeamSummary,
     ESPNTeamProjectionRequest,
@@ -664,6 +666,59 @@ def build_league_connect_response(
         team_count=len(teams),
         teams=teams,
     )
+
+
+def build_scoreboard_response(league, week: int) -> ESPNScoreboardResponse:
+    """Fetch weekly scores without loading NFL data or running any model."""
+    periods = getattr(league.settings, "matchup_periods", {})
+    period = next((int(key) for key, weeks in periods.items() if week in weeks), week)
+    data = league.espn_request.league_get(
+        params={"view": ["mMatchupScore", "mScoreboard"], "scoringPeriodId": week},
+        headers={"x-fantasy-filter": json.dumps({
+            "schedule": {"filterMatchupPeriodIds": {"value": [period]}}
+        })},
+    )
+    teams = {int(team.team_id): str(team.team_name) for team in league.teams}
+    opponents: dict[int, int | None] = {}
+    games = []
+
+    def score(side):
+        # ESPN's summary total can stay zero while the live total is populated.
+        weekly = side.get("pointsByScoringPeriod", {}).get(str(week))
+        value = weekly if weekly is not None else side.get("totalPointsLive")
+        if value is None and len(periods.get(str(period), periods.get(period, [week]))) == 1:
+            value = side.get("totalPoints")
+        return optional_number(value)
+
+    for entry in data.get("schedule", []):
+        if int(entry.get("matchupPeriodId", 0)) != period:
+            continue
+        home, away = entry.get("home", {}), entry.get("away", {})
+        home_id, away_id = home.get("teamId"), away.get("teamId")
+        if home_id in teams:
+            opponents[home_id] = away_id if away_id in teams and away_id != home_id else None
+        if away_id in teams:
+            opponents[away_id] = home_id if home_id in teams and away_id != home_id else None
+        if home_id not in teams or away_id not in teams or home_id == away_id:
+            continue
+        games.append(ESPNScoreboardMatchup(
+            home_team_id=home_id, home_team_name=teams[home_id], home_score=score(home),
+            away_team_id=away_id, away_team_name=teams[away_id], away_score=score(away),
+        ))
+    return ESPNScoreboardResponse(week=week, checked_at=datetime.now(timezone.utc),
+                                  opponents_by_team=opponents, scoreboard=games)
+
+
+@router.post("/scoreboard", response_model=ESPNScoreboardResponse)
+def get_public_scoreboard(payload: ESPNLeaguePlayersRequest):
+    league = get_public_league(payload.league_id, payload.season)
+    return build_scoreboard_response(league, payload.week)
+
+
+@router.post("/local/scoreboard", response_model=ESPNScoreboardResponse, include_in_schema=False)
+def get_local_scoreboard(payload: ESPNLocalLeaguePlayersRequest, request: Request):
+    _, league = get_configured_private_league(request)
+    return build_scoreboard_response(league, payload.week)
 
 
 def build_matchup_response(

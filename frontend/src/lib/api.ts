@@ -12,6 +12,7 @@ import type {
   LocalLeaguePlayersInput,
   LocalTeamProjectionInput,
   MatchupResponse,
+  ScoreboardResponse,
   TeamProjectionInput,
   TeamProjectionResponse,
 } from '../types/api'
@@ -19,6 +20,13 @@ import type {
 const API_BASE_URL = (
   import.meta.env?.VITE_API_BASE_URL ?? ''
 ).replace(/\/$/, '')
+
+export function getScoreboard(input: LeaguePlayersInput, mode: 'public' | 'local'): Promise<ScoreboardResponse> {
+  return postJson<ScoreboardResponse>(
+    mode === 'local' ? '/api/espn/local/scoreboard' : '/api/espn/scoreboard',
+    mode === 'local' ? { week: input.week } : input,
+  )
+}
 
 function getErrorMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') {

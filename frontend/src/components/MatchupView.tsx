@@ -9,6 +9,7 @@ import { matchupOptions } from '../lib/matchupOptions'
 import {
   getLocalMatchup,
   getMatchup,
+  getScoreboard,
   getTeamLogoUrl,
 } from '../lib/api'
 import type {
@@ -18,6 +19,7 @@ import type {
   RosterProjection,
   TeamProjectionResponse,
   LivePlayerScore,
+  ScoreboardResponse,
 } from '../types/api'
 
 type MatchupViewProps = {
@@ -250,6 +252,41 @@ export function MatchupView({
   const [error, setError] = useState<string | null>(null)
   const requestVersion = useRef(0)
   const [isRefreshingData, setIsRefreshingData] = useState(false)
+  const [scoreboardState, setScoreboardState] = useState<{
+    key: string; data: ScoreboardResponse | null; error: string | null
+  } | null>(null)
+  const scoreboardKey = JSON.stringify([connectionMode, league.league_id, league.season, week])
+  const currentScoreboard = scoreboardState?.key === scoreboardKey ? scoreboardState : null
+
+  useEffect(() => {
+    let cancelled = false
+    let pending = false
+    async function update() {
+      if (pending || document.hidden) return
+      pending = true
+      try {
+        const data = await getScoreboard({ league_id: league.league_id, season: league.season, week }, connectionMode)
+        if (!cancelled) setScoreboardState({ key: scoreboardKey, data, error: null })
+      } catch (caught) {
+        if (!cancelled) setScoreboardState((previous) => ({
+          key: scoreboardKey,
+          data: previous?.key === scoreboardKey ? previous.data : null,
+          error: caught instanceof Error ? caught.message : 'Scoreboard could not be updated.',
+        }))
+      } finally {
+        pending = false
+      }
+    }
+    void update()
+    const timer = window.setInterval(() => { void update() }, 30_000)
+    const visible = () => { if (!document.hidden) void update() }
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [connectionMode, league.league_id, league.season, week, scoreboardKey])
 
   const loadMatchup = useCallback(async (refresh = false) => {
     const version = ++requestVersion.current
@@ -306,11 +343,13 @@ export function MatchupView({
   const options = matchupOptions(
     league.teams,
     week,
-    matchup?.week === week ? matchup.opponents_by_team : undefined,
+    currentScoreboard?.data?.opponents_by_team
+      ?? (matchup?.week === week ? matchup.opponents_by_team : undefined),
   )
   const selectedMatchup = options.find(
     (option) => option.teamId === selectedTeamId || option.opponentId === selectedTeamId,
   )
+  const scoreboardGames = currentScoreboard?.data?.scoreboard ?? []
 
   return (
     <>
@@ -394,11 +433,12 @@ export function MatchupView({
         </div>
       )}
 
-      {matchup && (
-        <>
-          <ProjectionFreshness generatedAt={matchup.home.generated_at} />
-          <LiveScoreNote data={live.data} error={live.error} />
-          {(matchup.scoreboard?.length ?? 0) > 0 && (
+      {currentScoreboard?.error && (
+        <p role="status" className="mt-4 text-sm text-amber-700 dark:text-amber-300">
+          {currentScoreboard.error} {currentScoreboard.data ? 'Showing last received scores; they may be stale.' : 'League scores are unavailable.'}
+        </p>
+      )}
+          {scoreboardGames.length > 0 && (
             <section className="mt-5" aria-labelledby="league-scoreboard-heading">
               <div className="mb-3 flex items-end justify-between gap-4">
                 <div>
@@ -412,14 +452,8 @@ export function MatchupView({
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">ESPN scores</p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {matchup.scoreboard?.map((game) => {
-                  const isSelected = (
-                    game.home_team_id === matchup.home.team_id
-                    && game.away_team_id === matchup.away.team_id
-                  ) || (
-                    game.home_team_id === matchup.away.team_id
-                    && game.away_team_id === matchup.home.team_id
-                  )
+                {scoreboardGames.map((game) => {
+                  const isSelected = game.home_team_id === selectedTeamId || game.away_team_id === selectedTeamId
 
                   return (
                     <button
@@ -436,9 +470,9 @@ export function MatchupView({
                     >
                       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-sm">
                         <span className="truncate font-bold text-slate-700 dark:text-slate-200">{game.away_team_name}</span>
-                        <span className="font-black tabular-nums text-slate-950 dark:text-white">{game.away_score.toFixed(1)}</span>
+                        <span className="font-black tabular-nums text-slate-950 dark:text-white">{game.away_score?.toFixed(1) ?? '—'}</span>
                         <span className="truncate font-bold text-slate-700 dark:text-slate-200">{game.home_team_name}</span>
-                        <span className="font-black tabular-nums text-slate-950 dark:text-white">{game.home_score.toFixed(1)}</span>
+                        <span className="font-black tabular-nums text-slate-950 dark:text-white">{game.home_score?.toFixed(1) ?? '—'}</span>
                       </div>
                       <p className={`mt-3 text-[10px] font-black uppercase tracking-[0.14em] ${
                         isSelected
@@ -453,6 +487,10 @@ export function MatchupView({
               </div>
             </section>
           )}
+      {matchup && (
+        <>
+          <ProjectionFreshness generatedAt={matchup.home.generated_at} />
+          <LiveScoreNote data={live.data} error={live.error} />
           <section className="mt-5 rounded-3xl bg-slate-950 px-5 py-7 text-white shadow-xl sm:px-8">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-5 text-center">
               <div>

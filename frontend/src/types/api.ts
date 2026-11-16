@@ -81,10 +81,17 @@ export type TeamProjectionResponse = {
 export type ScoreboardMatchup = {
   home_team_id: number
   home_team_name: string
-  home_score: number
+  home_score: number | null
   away_team_id: number
   away_team_name: string
-  away_score: number
+  away_score: number | null
+}
+
+export type ScoreboardResponse = {
+  week: number
+  checked_at: string
+  opponents_by_team: Record<string, number | null>
+  scoreboard: ScoreboardMatchup[]
 }
 
 export type MatchupResponse = {

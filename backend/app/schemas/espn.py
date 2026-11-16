@@ -172,10 +172,17 @@ class ESPNTeamProjectionResponse(BaseModel):
 class ESPNScoreboardMatchup(BaseModel):
     home_team_id: int
     home_team_name: str
-    home_score: float
+    home_score: float | None
     away_team_id: int
     away_team_name: str
-    away_score: float
+    away_score: float | None
+
+
+class ESPNScoreboardResponse(BaseModel):
+    week: int
+    checked_at: datetime
+    opponents_by_team: dict[int, int | None]
+    scoreboard: list[ESPNScoreboardMatchup]
 
 
 class ESPNMatchupResponse(BaseModel):
