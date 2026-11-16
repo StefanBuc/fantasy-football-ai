@@ -22,7 +22,16 @@ export type ESPNLeague = {
   teams: ESPNTeamSummary[]
 }
 
-export type RosterProjection = {
+export type ProjectionDisplay = {
+  floor_points?: number | null
+  ceiling_points?: number | null
+  range_note?: string | null
+  kickoff_at?: string | null
+  prediction_saved?: boolean
+  pregame_predicted_points?: number | null
+}
+
+export type RosterProjection = ProjectionDisplay & {
   espn_id: number
   player_id: string | null
   player_name: string
@@ -82,7 +91,8 @@ export type MatchupResponse = {
   away: TeamProjectionResponse
 }
 
-export type LeaguePlayer = {
+export type LeaguePlayer = ProjectionDisplay & {
+  player_id?: string | null
   espn_id: number
   player_name: string
   position: string
@@ -148,4 +158,102 @@ export type LeaguePlayersInput = ConnectLeagueInput & {
 
 export type LocalLeaguePlayersInput = {
   week: number
+}
+
+export type AccuracyMetrics = {
+  saved: number
+  scored: number
+  pending: number
+  mae: number | null
+  bias: number | null
+}
+
+export type AccuracyRecord = {
+  season: number
+  week: number
+  player_id: string
+  player_name: string | null
+  position: string
+  team: string
+  opponent_team: string
+  predicted_points: number
+  actual_points: number | null
+  error: number | null
+  projection_method: string
+  model_version: string
+  model_revision: string
+  generated_at: string
+  recorded_at: string
+  kickoff: string
+  actual_updated_at: string | null
+}
+
+export type AccuracyReport = {
+  season: number
+  scoring: string
+  summary: AccuracyMetrics
+  by_position: (AccuracyMetrics & { position: string })[]
+  by_model: (AccuracyMetrics & { model_version: string; model_revision: string; projection_method: string })[]
+  weekly_trend: (AccuracyMetrics & { week: number })[]
+  records: AccuracyRecord[]
+  limit: number
+  offset: number
+}
+
+export type AccuracyQuery = {
+  season: number
+  league_id?: number
+  week?: number
+  position?: string
+  offset?: number
+}
+
+export type AccuracySyncResult = { updated_count: number; checked_count: number }
+
+export type AutomationJob = {
+  week: number | null
+  state: 'running' | 'success' | 'error'
+  last_started_at: string | null
+  last_finished_at: string | null
+  last_success_at: string | null
+  last_error: string | null
+  next_run_at: string | null
+  result: Record<string, number> | null
+}
+
+export type AutomationStatus = {
+  enabled: boolean
+  registered: boolean
+  capture_enabled: boolean
+  note: string
+  last_checked_at: string | null
+  worker_error: string | null
+  capture: AutomationJob | null
+  sync: AutomationJob | null
+  poll_seconds: number
+  capture_interval_minutes: number
+  capture_window_hours: number
+  sync_interval_hours: number
+}
+
+export type LivePlayerDescriptor = {
+  espn_id: number
+  player_id?: string | null
+  position: string
+  team: string | null
+}
+
+export type LivePlayerScore = ProjectionDisplay & {
+  espn_id: number
+  game_state: 'pregame' | 'live' | 'final' | 'postponed' | 'bye' | 'unknown'
+  live_points: number | null
+  game_detail: string | null
+}
+
+export type LiveScoreResponse = {
+  season: number
+  week: number
+  checked_at: string
+  note: string
+  players: LivePlayerScore[]
 }

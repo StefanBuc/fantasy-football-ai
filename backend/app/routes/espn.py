@@ -1,4 +1,5 @@
 from typing import Any, Literal
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import requests as http_requests
@@ -31,11 +32,18 @@ from app.schemas.espn import (
     ESPNTeamSummary,
     ESPNTeamProjectionRequest,
     ESPNTeamProjectionResponse,
+    ESPNLiveRequest,
+    ESPNLocalLiveRequest,
+    ESPNLiveResponse,
 )
 from app.services.weekly_projection_service import (
     WeeklyProjectionService,
 )
 from app.services.projection_registry import projection_services
+from app.services.prediction_history import record_predictions
+from app.services.accuracy_jobs import register_league_tracking
+from app.services.score_presentation import prediction_display
+from app.services.live_scores import live_response, LiveLeagueClient
 from app.services.matchup_probability import estimate_win_chance
 from app.services.espn_connection_cache import espn_connection_cache
 from app.services.espn_projection_cache import (
@@ -188,12 +196,15 @@ def build_league_player(
     )
 
 
-def build_league_players_response(
+def project_league_players(
     league,
     league_id: int,
     season: int,
     week: int,
-) -> ESPNLeaguePlayersResponse:
+    service: WeeklyProjectionService | None = None,
+    strict_history: bool = False,
+    history_schedule=None,
+) -> tuple[ESPNLeaguePlayersResponse, int]:
     players_by_id: dict[int, ESPNLeaguePlayerResponse] = {}
     player_sources_by_id: dict[int, Any] = {}
 
@@ -244,7 +255,8 @@ def build_league_players_response(
             players_by_id[league_player.espn_id] = league_player
             player_sources_by_id[league_player.espn_id] = player
 
-    service = get_espn_projection_service(season)
+    if service is None:
+        service = get_espn_projection_service(season)
     roster_df, roster_week = (
         service.data.get_projection_roster(
             season=season,
@@ -318,6 +330,7 @@ def build_league_players_response(
                 "projection_method": (
                     projection.projection_method
                 ),
+                "player_id": projection.player_id,
                 "history_games": projection.history_games,
                 "projection_reason": projection_reason,
                 "is_on_bye": is_on_bye,
@@ -344,6 +357,24 @@ def build_league_players_response(
         for player in players
     )
 
+    saved = record_predictions(
+        service, season=season, week=week, scope=f"espn:{league_id}",
+        generated_at=datetime.now(timezone.utc),
+        strict=strict_history, schedule=history_schedule,
+        samples=[{
+            "player_id": projections_by_id[player.espn_id].player_id,
+            "player_name": player.player_name, "position": player.position,
+            "team": player.team, "opponent_team": player.opponent_team,
+            "predicted_points": player.predicted_points,
+            "projection_method": player.projection_method,
+            "availability": player.availability,
+        } for player in players if player.projection_status == "projected" and not player.is_on_bye],
+    )
+
+    players = [ESPNLeaguePlayerResponse(**item) for item in prediction_display(
+        service, season, week, f"espn:{league_id}", [player.model_dump() for player in players],
+        schedule=history_schedule,
+    )]
     return ESPNLeaguePlayersResponse(
         league_id=league_id,
         season=season,
@@ -353,7 +384,12 @@ def build_league_players_response(
         available_count=available_count,
         rostered_count=len(players) - available_count,
         players=players,
-    )
+    ), saved
+
+
+def build_league_players_response(league, league_id: int, season: int, week: int) -> ESPNLeaguePlayersResponse:
+    response, _ = project_league_players(league, league_id, season, week)
+    return response
 
 
 def get_espn_projection_service(
@@ -367,10 +403,12 @@ def get_public_league(
     season: int,
 ):
     try:
-        return get_league(
+        league = get_league(
             league_id=league_id,
             year=season,
         )
+        register_league_tracking(league_id, season, "public")
+        return league
 
     except ESPNAccessDenied as error:
         raise HTTPException(
@@ -471,6 +509,7 @@ def get_configured_private_league(
             detail="ESPN returned an unexpected response.",
         ) from error
 
+    register_league_tracking(config.league_id, config.season, "local")
     return config, league
 
 
@@ -758,6 +797,16 @@ def build_team_projection_response(
         for player in players
     )
 
+    record_predictions(
+        service, season=season, week=week, scope=f"espn:{league_id}",
+        generated_at=cached_projection.generated_at,
+        samples=[player.model_dump() for player in players
+                 if player.status == "projected" and not player.is_on_bye],
+    )
+
+    players = [ESPNRosterProjectionResponse(**item) for item in prediction_display(
+        service, season, week, f"espn:{league_id}", [player.model_dump() for player in players],
+    )]
     return ESPNTeamProjectionResponse(
         league_id=league_id,
         league_name=str(league.settings.name),
@@ -788,6 +837,20 @@ def connect_public_league(
         league_id=payload.league_id,
         season=payload.season,
     )
+
+
+@router.post("/live", response_model=ESPNLiveResponse)
+def get_public_live_scores(payload: ESPNLiveRequest):
+    return live_response(LiveLeagueClient(payload.league_id, payload.season),
+                         payload.season, payload.week, payload.players, f"espn:{payload.league_id}")
+
+
+@router.post("/local/live", response_model=ESPNLiveResponse, include_in_schema=False)
+def get_local_live_scores(payload: ESPNLocalLiveRequest, request: Request):
+    config = require_local_espn_access(request)
+    return live_response(LiveLeagueClient(config.league_id, config.season, config.espn_s2, config.swid),
+                         config.season, payload.week, payload.players,
+                         f"espn:{config.league_id}", credentials=(config.espn_s2, config.swid))
 
 
 @router.post(

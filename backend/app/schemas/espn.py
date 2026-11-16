@@ -66,7 +66,18 @@ class ESPNLocalLeaguePlayersRequest(BaseModel):
     week: int = Field(ge=1, le=18)
 
 
-class ESPNLeaguePlayerResponse(BaseModel):
+class ProjectionDisplay(BaseModel):
+    floor_points: float | None = None
+    ceiling_points: float | None = None
+    range_note: str | None = None
+    range_revision: str | None = None
+    kickoff_at: datetime | None = None
+    prediction_saved: bool = False
+    pregame_predicted_points: float | None = None
+
+
+class ESPNLeaguePlayerResponse(ProjectionDisplay):
+    player_id: str | None = None
     espn_id: int
     player_name: str
     position: str
@@ -110,7 +121,7 @@ class ESPNLeaguePlayersResponse(BaseModel):
     players: list[ESPNLeaguePlayerResponse]
 
 
-class ESPNRosterProjectionResponse(BaseModel):
+class ESPNRosterProjectionResponse(ProjectionDisplay):
     espn_id: int
     player_id: str | None
     player_name: str
@@ -169,3 +180,35 @@ class ESPNMatchupResponse(BaseModel):
     away_score: float
     home: ESPNTeamProjectionResponse
     away: ESPNTeamProjectionResponse
+
+
+class LivePlayerRequest(BaseModel):
+    espn_id: int = Field(ge=-2147483648, le=2147483647)
+    player_id: str | None = Field(default=None, max_length=64)
+    position: str = Field(max_length=8)
+    team: str | None = Field(default=None, max_length=8)
+
+
+class ESPNLiveRequest(ESPNLeagueConnectRequest):
+    week: int = Field(ge=1, le=18)
+    players: list[LivePlayerRequest] = Field(max_length=1200)
+
+
+class ESPNLocalLiveRequest(BaseModel):
+    week: int = Field(ge=1, le=18)
+    players: list[LivePlayerRequest] = Field(max_length=1200)
+
+
+class LivePlayerScore(ProjectionDisplay):
+    espn_id: int
+    game_state: Literal["pregame", "live", "final", "postponed", "bye", "unknown"]
+    live_points: float | None
+    game_detail: str | None = None
+
+
+class ESPNLiveResponse(BaseModel):
+    season: int
+    week: int
+    checked_at: datetime
+    note: str
+    players: list[LivePlayerScore]
