@@ -78,8 +78,18 @@ export type TeamProjectionResponse = {
   players: RosterProjection[]
 }
 
+export type ScoreboardMatchup = {
+  home_team_id: number
+  home_team_name: string
+  home_score: number
+  away_team_id: number
+  away_team_name: string
+  away_score: number
+}
+
 export type MatchupResponse = {
   opponents_by_team?: Record<string, number | null>
+  scoreboard?: ScoreboardMatchup[]
   home_win_pct: number | null
   away_win_pct: number | null
   win_probability_note: string

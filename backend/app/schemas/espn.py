@@ -17,6 +17,7 @@ class ESPNTeamSummary(BaseModel):
     points_against: float
     streak: str | None = None
     playoff_pct: float | None = None
+    opponents_by_week: dict[int, int | None] = Field(default_factory=dict)
 
 
 class ESPNLeagueConnectResponse(BaseModel):
@@ -168,7 +169,18 @@ class ESPNTeamProjectionResponse(BaseModel):
     players: list[ESPNRosterProjectionResponse]
 
 
+class ESPNScoreboardMatchup(BaseModel):
+    home_team_id: int
+    home_team_name: str
+    home_score: float
+    away_team_id: int
+    away_team_name: str
+    away_score: float
+
+
 class ESPNMatchupResponse(BaseModel):
+    opponents_by_team: dict[int, int | None] = Field(default_factory=dict)
+    scoreboard: list[ESPNScoreboardMatchup] = Field(default_factory=list)
     home_win_pct: float | None = Field(default=None, ge=0, le=100)
     away_win_pct: float | None = Field(default=None, ge=0, le=100)
     win_probability_note: str = "Pregame estimate unavailable."

@@ -166,6 +166,15 @@ def test_connect_private_espn_league_returns_403(
     }
 
 
+def test_team_schedule_maps_nfl_weeks_including_multiweek_matchups_and_byes():
+    first = SimpleNamespace(team_id=1)
+    second = SimpleNamespace(team_id=2)
+    first.schedule = [second, first, 2]
+    league = SimpleNamespace(teams=[first, second],
+                             settings=SimpleNamespace(matchup_periods={"1": [1], "2": [2], "3": [3, 4]}))
+    assert espn_route.team_opponents_by_week(league, first) == {1: 2, 2: None, 3: 2, 4: 2}
+
+
 class FakeNFLData:
     def get_week_roster(self, season, week):
         return pd.DataFrame(
@@ -616,6 +625,10 @@ def test_build_matchup_response_finds_team_opponent(
     assert result.away.team_id == 2
     assert result.home_score == 101.5
     assert result.away_score == 98.25
+    assert result.opponents_by_team == {1: 2, 2: 1}
+    assert len(result.scoreboard) == 1
+    assert result.scoreboard[0].home_team_name == "Team 1"
+    assert result.scoreboard[0].away_team_name == "Team 2"
 
 
 def test_projection_cache_invalidates_when_injury_changes(

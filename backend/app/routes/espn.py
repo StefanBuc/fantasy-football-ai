@@ -28,6 +28,7 @@ from app.schemas.espn import (
     ESPNLocalLeaguePlayersRequest,
     ESPNLocalTeamProjectionRequest,
     ESPNMatchupResponse,
+    ESPNScoreboardMatchup,
     ESPNRosterProjectionResponse,
     ESPNTeamSummary,
     ESPNTeamProjectionRequest,
@@ -569,6 +570,32 @@ def get_configured_private_team_logo(
     )
 
 
+def team_opponents_by_week(league, team) -> dict[int, int | None]:
+    schedule = getattr(team, "schedule", [])
+    periods = getattr(league.settings, "matchup_periods", None)
+    if not isinstance(periods, dict):
+        periods = {index + 1: [index + 1] for index in range(len(schedule))}
+    team_ids = {int(item.team_id) for item in league.teams}
+    opponents = {}
+    for period, weeks in periods.items():
+        try:
+            index = int(period) - 1
+            if not 0 <= index < len(schedule):
+                continue
+            opponent = schedule[index]
+            opponent_id = int(getattr(opponent, "team_id", opponent)) if opponent is not None else None
+        except (ValueError, TypeError):
+            continue
+        if opponent_id == int(team.team_id) or opponent_id is None or opponent_id <= 0:
+            opponent_id = None
+        elif opponent_id not in team_ids:
+            continue
+        for week in weeks:
+            if 1 <= int(week) <= 18:
+                opponents[int(week)] = opponent_id
+    return opponents
+
+
 def build_league_connect_response(
     league,
     league_id: int,
@@ -594,6 +621,7 @@ def build_league_connect_response(
 
     teams = [
         ESPNTeamSummary(
+            opponents_by_week=team_opponents_by_week(league, team),
             team_id=int(team.team_id),
             team_name=str(team.team_name),
             abbreviation=str(team.team_abbrev),
@@ -646,14 +674,41 @@ def build_matchup_response(
     week: int,
     service: WeeklyProjectionService | None = None,
 ) -> ESPNMatchupResponse:
+    scoreboard = list(league.scoreboard(week))
+    opponents_by_team: dict[int, int | None] = {}
+    scoreboard_response: list[ESPNScoreboardMatchup] = []
+    for entry in scoreboard:
+        home_team = getattr(entry, "home_team", None)
+        away_team = getattr(entry, "away_team", None)
+        home_id = int(getattr(home_team, "team_id", home_team or 0))
+        away_id = int(getattr(away_team, "team_id", away_team or 0))
+        if home_id > 0:
+            opponents_by_team[home_id] = away_id if away_id > 0 and away_id != home_id else None
+        if away_id > 0:
+            opponents_by_team[away_id] = home_id if home_id > 0 and home_id != away_id else None
+        if home_id > 0 and away_id > 0 and home_id != away_id:
+            scoreboard_response.append(
+                ESPNScoreboardMatchup(
+                    home_team_id=home_id,
+                    home_team_name=str(
+                        getattr(home_team, "team_name", f"Team {home_id}")
+                    ),
+                    home_score=float(getattr(entry, "home_score", 0.0)),
+                    away_team_id=away_id,
+                    away_team_name=str(
+                        getattr(away_team, "team_name", f"Team {away_id}")
+                    ),
+                    away_score=float(getattr(entry, "away_score", 0.0)),
+                )
+            )
     matchup = next(
         (
             matchup
-            for matchup in league.scoreboard(week)
+            for matchup in scoreboard
             if team_id
             in {
-                int(matchup.home_team.team_id),
-                int(matchup.away_team.team_id),
+                int(getattr(matchup.home_team, "team_id", matchup.home_team or 0)),
+                int(getattr(matchup.away_team, "team_id", matchup.away_team or 0)),
             }
         ),
         None,
@@ -668,6 +723,8 @@ def build_matchup_response(
             ),
         )
 
+    if opponents_by_team.get(team_id) is None:
+        raise HTTPException(status_code=404, detail=f"This team has no opponent in week {week}.")
     home_team_id = int(matchup.home_team.team_id)
     away_team_id = int(matchup.away_team.team_id)
 
@@ -683,6 +740,8 @@ def build_matchup_response(
         team_id=away_team_id, week=week, service=service,
     )
     return ESPNMatchupResponse(
+        opponents_by_team=opponents_by_team,
+        scoreboard=scoreboard_response,
         league_id=league_id,
         league_name=str(league.settings.name),
         season=season,

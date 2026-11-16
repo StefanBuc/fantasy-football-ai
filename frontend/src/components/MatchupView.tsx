@@ -398,6 +398,61 @@ export function MatchupView({
         <>
           <ProjectionFreshness generatedAt={matchup.home.generated_at} />
           <LiveScoreNote data={live.data} error={live.error} />
+          {(matchup.scoreboard?.length ?? 0) > 0 && (
+            <section className="mt-5" aria-labelledby="league-scoreboard-heading">
+              <div className="mb-3 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
+                    League scoreboard
+                  </p>
+                  <h2 id="league-scoreboard-heading" className="mt-1 text-lg font-black text-slate-950 dark:text-white">
+                    Week {week} matchups
+                  </h2>
+                </div>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">ESPN scores</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {matchup.scoreboard?.map((game) => {
+                  const isSelected = (
+                    game.home_team_id === matchup.home.team_id
+                    && game.away_team_id === matchup.away.team_id
+                  ) || (
+                    game.home_team_id === matchup.away.team_id
+                    && game.away_team_id === matchup.home.team_id
+                  )
+
+                  return (
+                    <button
+                      key={`${game.away_team_id}-${game.home_team_id}`}
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => onTeamChange(game.home_team_id)}
+                      aria-current={isSelected ? 'true' : undefined}
+                      className={`rounded-2xl border p-4 text-left shadow-sm transition focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-wait dark:focus:ring-emerald-950 ${
+                        isSelected
+                          ? 'border-lime-400 bg-lime-50 ring-1 ring-lime-300 dark:border-lime-400 dark:bg-lime-950/40'
+                          : 'border-slate-200 bg-white hover:border-emerald-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 dark:hover:border-emerald-600'
+                      }`}
+                    >
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-sm">
+                        <span className="truncate font-bold text-slate-700 dark:text-slate-200">{game.away_team_name}</span>
+                        <span className="font-black tabular-nums text-slate-950 dark:text-white">{game.away_score.toFixed(1)}</span>
+                        <span className="truncate font-bold text-slate-700 dark:text-slate-200">{game.home_team_name}</span>
+                        <span className="font-black tabular-nums text-slate-950 dark:text-white">{game.home_score.toFixed(1)}</span>
+                      </div>
+                      <p className={`mt-3 text-[10px] font-black uppercase tracking-[0.14em] ${
+                        isSelected
+                          ? 'text-emerald-700 dark:text-lime-300'
+                          : 'text-slate-400'
+                      }`}>
+                        {isSelected ? 'Selected matchup' : 'View matchup'}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          )}
           <section className="mt-5 rounded-3xl bg-slate-950 px-5 py-7 text-white shadow-xl sm:px-8">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-5 text-center">
               <div>
