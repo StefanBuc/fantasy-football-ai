@@ -1,6 +1,10 @@
 from typing import cast
 from uuid import uuid4
 from hashlib import sha256
+from app.services.pytorch_inference import (
+    PyTorchProjectionService,
+)
+
 from app.services.data_snapshot import (
     source_fingerprint, model_fingerprint, encode_frames, decode_frames, FrameSnapshot,
 )
@@ -9,9 +13,6 @@ from app.services.disk_cache import disk_cache
 from app.services.result_cache import ResultCache
 from app.services.performance import logger, timed_stage
 
-from app.services.pytorch_inference import (
-    PyTorchProjectionService,
-)
 from app.services.NFL_data import NFLData
 from app.services.projection_slate import (
     build_projection_requests,
