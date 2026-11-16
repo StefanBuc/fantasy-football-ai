@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ProjectionFreshness } from './ProjectionFreshness'
 import { viewCache, viewKey } from '../lib/viewCache'
-import { PlayerScore, LiveScoreNote } from './PlayerScore'
-import { useLiveScores } from '../lib/useLiveScores'
-import { teamScoreDisplay } from '../lib/scoreDisplay'
 
 import {
   getLocalMatchup,
@@ -16,7 +13,6 @@ import type {
   MatchupResponse,
   RosterProjection,
   TeamProjectionResponse,
-  LivePlayerScore,
 } from '../types/api'
 
 type MatchupViewProps = {
@@ -64,14 +60,13 @@ function sortStarters(players: RosterProjection[]): RosterProjection[] {
   })
 }
 
-function TeamScore({ team, liveScores }: { team: TeamProjectionResponse; liveScores: Map<number, LivePlayerScore> }) {
-  const score = teamScoreDisplay(team.players, liveScores)
-  const format = (value: number | null) => value === null ? '—' : value.toFixed(1)
-  return <div>
-    <p className="mt-2 text-xs font-bold text-slate-400">{score.started ? score.final ? 'Final · ESPN' : score.actual === null ? 'ESPN score' : 'Live · ESPN' : 'AI projected'}</p>
-    <p className="mt-1 text-4xl font-black tabular-nums text-lime-300">{format(score.started ? score.actual : score.prediction)}</p>
-    {score.started && <p className="mt-2 text-sm font-bold text-slate-300">AI pregame {format(score.prediction)}</p>}
-  </div>
+function projectedTotal(team: TeamProjectionResponse): number {
+  return team.players
+    .filter((player) => !['BE', 'IR'].includes(player.lineup_slot))
+    .reduce(
+      (total, player) => total + (player.predicted_points ?? 0),
+      0,
+    )
 }
 
 function TeamLogo({
@@ -102,7 +97,7 @@ function TeamLogo({
   )
 }
 
-function MatchupPlayer({ player, live }: { player: RosterProjection; live?: LivePlayerScore }) {
+function MatchupPlayer({ player }: { player: RosterProjection }) {
   const showInjury = player.availability !== 'healthy'
   const fallbackLabel = player.projection_method === 'recent_average'
     ? `${player.history_games ?? 0}-game avg`
@@ -117,7 +112,7 @@ function MatchupPlayer({ player, live }: { player: RosterProjection; live?: Live
     : null
 
   return (
-    <div className="grid grid-cols-[44px_minmax(0,1fr)_100px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-0">
+    <div className="grid grid-cols-[44px_minmax(0,1fr)_58px] items-center gap-3 border-t border-slate-100 px-4 py-3 first:border-0">
       <span className="text-xs font-black text-slate-400">
         {displayLineupSlot(player.lineup_slot)}
       </span>
@@ -173,7 +168,11 @@ function MatchupPlayer({ player, live }: { player: RosterProjection; live?: Live
               : ''}
         </p>
       </div>
-      <PlayerScore player={player} live={live} />
+      <p className="text-right text-lg font-black tabular-nums text-slate-950">
+        {player.predicted_points !== null
+          ? player.predicted_points.toFixed(1)
+          : '—'}
+      </p>
     </div>
   )
 }
@@ -182,12 +181,10 @@ function MatchupRoster({
   projection,
   team,
   connectionMode,
-  liveScores,
 }: {
   projection: TeamProjectionResponse
   team: ESPNTeamSummary | undefined
   connectionMode: 'public' | 'local'
-  liveScores: Map<number, LivePlayerScore>
 }) {
   const starters = sortStarters(
     projection.players.filter(
@@ -216,7 +213,7 @@ function MatchupRoster({
         </div>
       </div>
       {starters.map((player) => (
-        <MatchupPlayer key={player.espn_id} player={player} live={liveScores.get(player.espn_id)} />
+        <MatchupPlayer key={player.espn_id} player={player} />
       ))}
 
       <div className="border-y border-slate-200 bg-slate-50 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
@@ -224,7 +221,7 @@ function MatchupRoster({
       </div>
       {bench.length > 0 ? (
         bench.map((player) => (
-          <MatchupPlayer key={player.espn_id} player={player} live={liveScores.get(player.espn_id)} />
+          <MatchupPlayer key={player.espn_id} player={player} />
         ))
       ) : (
         <p className="px-4 py-5 text-sm text-slate-500">
@@ -292,9 +289,6 @@ export function MatchupView({
       requestVersion.current += 1
     }
   }, [loadMatchup])
-
-  const live = useLiveScores(league.league_id, league.season, week, connectionMode,
-    matchup?.week === week ? [...matchup.home.players, ...matchup.away.players] : [])
 
   const homeTeam = league.teams.find(
     (team) => team.team_id === matchup?.home.team_id,
@@ -387,28 +381,31 @@ export function MatchupView({
       {matchup && (
         <>
           <ProjectionFreshness generatedAt={matchup.home.generated_at} />
-          <LiveScoreNote data={live.data} error={live.error} />
           <section className="mt-5 rounded-3xl bg-slate-950 px-5 py-7 text-white shadow-xl sm:px-8">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-5 text-center">
               <div>
                 <p className="truncate text-sm font-bold text-slate-300">{matchup.away.team_name}</p>
-                <TeamScore team={matchup.away} liveScores={live.scores} />
+                <p className="mt-2 text-4xl font-black tabular-nums text-lime-300">
+                  {projectedTotal(matchup.away).toFixed(1)}
+                </p>
                 {matchup.away_win_pct !== null && (
                   <p className="mt-2 text-sm font-bold text-white">
-                    {matchup.away_win_pct.toFixed(1)}% pregame estimated win chance
+                    {matchup.away_win_pct.toFixed(1)}% estimated win chance
                   </p>
                 )}
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Starters</p>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Projected</p>
                 <p className="mt-1 text-lg font-black text-slate-400">VS</p>
               </div>
               <div>
                 <p className="truncate text-sm font-bold text-slate-300">{matchup.home.team_name}</p>
-                <TeamScore team={matchup.home} liveScores={live.scores} />
+                <p className="mt-2 text-4xl font-black tabular-nums text-lime-300">
+                  {projectedTotal(matchup.home).toFixed(1)}
+                </p>
                 {matchup.home_win_pct !== null && (
                   <p className="mt-2 text-sm font-bold text-white">
-                    {matchup.home_win_pct.toFixed(1)}% pregame estimated win chance
+                    {matchup.home_win_pct.toFixed(1)}% estimated win chance
                   </p>
                 )}
               </div>
@@ -431,7 +428,11 @@ export function MatchupView({
                 <p className="mt-2">{matchup.win_probability_note}</p>
               </details>
             )}
-            <p className="mt-5 text-center text-xs font-semibold text-slate-400">Totals use the displayed starters. Live scores use ESPN league scoring; AI estimates use the app's scoring.</p>
+            {(matchup.away_score > 0 || matchup.home_score > 0) && (
+              <p className="mt-5 text-center text-xs font-semibold text-slate-400">
+                ESPN score: {matchup.away_score.toFixed(1)}–{matchup.home_score.toFixed(1)}
+              </p>
+            )}
           </section>
 
           <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -439,13 +440,11 @@ export function MatchupView({
               projection={matchup.away}
               team={awayTeam}
               connectionMode={connectionMode}
-              liveScores={live.scores}
             />
             <MatchupRoster
               projection={matchup.home}
               team={homeTeam}
               connectionMode={connectionMode}
-              liveScores={live.scores}
             />
           </div>
         </>

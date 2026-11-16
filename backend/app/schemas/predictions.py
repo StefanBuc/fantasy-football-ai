@@ -22,10 +22,6 @@ class ProjectionPlayerBase(BaseModel):
 class PlayerProjectionResponse(
     ProjectionPlayerBase
 ):
-    floor_points: float | None = None
-    ceiling_points: float | None = None
-    range_note: str | None = None
-    range_revision: str | None = None
     predicted_points: float
     projection_method: Literal[
         "model",

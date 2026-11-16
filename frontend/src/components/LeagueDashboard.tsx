@@ -10,7 +10,6 @@ import type {
   ESPNTeamSummary,
   RosterProjection,
   TeamProjectionResponse,
-  LivePlayerScore,
 } from '../types/api'
 import { LeagueStandings } from './LeagueStandings'
 import { MatchupView } from './MatchupView'
@@ -18,12 +17,9 @@ import { PlayersView } from './PlayersView'
 import { ThemeToggle } from './ThemeToggle'
 import { viewCache, viewKey } from '../lib/viewCache'
 import { ProjectionFreshness } from './ProjectionFreshness'
-import { AccuracyView } from './AccuracyView'
-import { PlayerScore, LiveScoreNote } from './PlayerScore'
-import { useLiveScores } from '../lib/useLiveScores'
 
 export type ConnectionMode = 'public' | 'local'
-type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy'
+type DashboardView = 'team' | 'matchup' | 'players' | 'league'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
@@ -157,7 +153,7 @@ function TeamAvatar({
   )
 }
 
-function PlayerRow({ player, live }: { player: RosterProjection; live?: LivePlayerScore }) {
+function PlayerRow({ player }: { player: RosterProjection }) {
   const positionClass =
     positionStyles[player.position]
     ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100'
@@ -222,7 +218,15 @@ function PlayerRow({ player, live }: { player: RosterProjection; live?: LivePlay
       </div>
 
       <div className="hidden text-right sm:block">
-        <PlayerScore player={player} live={live} />
+        {player.predicted_points !== null ? (
+          <p className="text-xl font-black tabular-nums text-slate-950">
+            {player.predicted_points.toFixed(1)}
+          </p>
+        ) : (
+          <p className="text-xs leading-4 text-slate-400" title={player.reason ?? ''}>
+            Not projected
+          </p>
+        )}
       </div>
 
       <div className="col-span-3 -mt-1 flex items-center justify-between sm:hidden">
@@ -237,7 +241,11 @@ function PlayerRow({ player, live }: { player: RosterProjection; live?: LivePlay
                 ? player.reason
                 : 'AI projection ready')}
         </p>
-        <div className="shrink-0"><PlayerScore player={player} live={live} /></div>
+        <p className="shrink-0 text-lg font-black tabular-nums text-slate-950">
+          {player.predicted_points !== null
+            ? `${player.predicted_points.toFixed(1)} pts`
+            : '—'}
+        </p>
       </div>
     </div>
   )
@@ -247,12 +255,10 @@ function RosterSection({
   title,
   subtitle,
   players,
-  liveScores,
 }: {
   title: string
   subtitle: string
   players: RosterProjection[]
-  liveScores: Map<number, LivePlayerScore>
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -269,12 +275,12 @@ function RosterSection({
         <span>Player</span>
         <span>Matchup</span>
         <span>Status</span>
-        <span className="text-right">Score / AI</span>
+        <span className="text-right">AI proj.</span>
       </div>
 
       {players.length > 0 ? (
         players.map((player) => (
-          <PlayerRow key={player.espn_id} player={player} live={liveScores.get(player.espn_id)} />
+          <PlayerRow key={player.espn_id} player={player} />
         ))
       ) : (
         <p className="px-6 py-8 text-center text-sm text-slate-500">
@@ -369,9 +375,6 @@ export function LeagueDashboard({
     }
   }, [activeView, loadProjection, selectedTeamId, week])
 
-  const live = useLiveScores(league.league_id, league.season, week, connectionMode,
-    activeView === 'team' && projection?.week === week ? projection.players : [])
-
   const starters = useMemo(() => {
     if (!projection) {
       return []
@@ -438,7 +441,6 @@ export function LeagueDashboard({
             ['matchup', 'Matchup'],
             ['players', 'Players'],
             ['league', 'League'],
-            ['accuracy', 'Accuracy'],
           ] as const).map(([view, label]) => (
             <button
               key={view}
@@ -522,7 +524,6 @@ export function LeagueDashboard({
             </div>
           </div>
           {projection && <ProjectionFreshness generatedAt={projection.generated_at} />}
-          {projection && <LiveScoreNote data={live.data} error={live.error} />}
           {isLoading && (
             <p role="status" className="mt-3 text-sm text-slate-500">
               {projection
@@ -575,20 +576,17 @@ export function LeagueDashboard({
                 title="Starting lineup"
                 subtitle={`Your active starters for Week ${projection.week}`}
                 players={starters}
-                liveScores={live.scores}
               />
               <RosterSection
                 title="Bench"
                 subtitle="Players currently outside the starting lineup"
                 players={bench}
-                liveScores={live.scores}
               />
               {injuredReserve.length > 0 && (
                 <RosterSection
                   title="Injured reserve"
                   subtitle="Players currently in an IR roster slot"
                   players={injuredReserve}
-                  liveScores={live.scores}
                 />
               )}
             </div>
@@ -629,8 +627,6 @@ export function LeagueDashboard({
             connectionMode={connectionMode}
           />
         )}
-
-        {activeView === 'accuracy' && <AccuracyView league={league} />}
 
         {activeView === 'players' && (
           <PlayersView

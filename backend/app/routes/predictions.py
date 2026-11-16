@@ -2,7 +2,6 @@ from fastapi import (APIRouter, HTTPException, Path, Query)
 from datetime import date
 from typing import Annotated
 from app.services.projection_registry import projection_services
-from app.services.projection_ranges import estimate_range
 
 from app.schemas.predictions import (
     PlayerProjectionResponse,
@@ -46,8 +45,6 @@ def get_weekly_projections(
     
     projections = [
         PlayerProjectionResponse(
-            **estimate_range(item.predicted_points, position, item.projection_method,
-                             getattr(service, "model_hashes", {})),
             player_id=item.request.player_id,
             player_name=item.request.player_name,
             position=position,

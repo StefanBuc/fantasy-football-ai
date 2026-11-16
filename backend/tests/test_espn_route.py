@@ -304,13 +304,6 @@ def test_public_team_projection_endpoint(monkeypatch):
     assert body["projected_count"] == 1
     assert body["skipped_count"] == 0
     assert body["players"][0] == {
-        "floor_points": None,
-        "ceiling_points": None,
-        "range_note": "Range unavailable: no validated calibration for this projection.",
-        "range_revision": None,
-        "kickoff_at": None,
-        "prediction_saved": False,
-        "pregame_predicted_points": None,
         "espn_id": 501,
         "player_id": "nfl-1",
         "player_name": "Test Player",

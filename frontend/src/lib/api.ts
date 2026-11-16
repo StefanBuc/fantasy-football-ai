@@ -1,10 +1,4 @@
 import type {
-  AccuracyQuery,
-  AccuracyReport,
-  AccuracySyncResult,
-  AutomationStatus,
-  LiveScoreResponse,
-  LivePlayerDescriptor,
   ConnectLeagueInput,
   ESPNLeague,
   LeaguePlayersInput,
@@ -64,17 +58,16 @@ function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
 async function sendJson<TResponse>(
   path: string,
   body: unknown,
-  method: 'POST' | 'GET' = 'POST',
 ): Promise<TResponse> {
   let response: Response
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
-      method,
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: method === 'POST' ? JSON.stringify(body) : undefined,
+      body: JSON.stringify(body),
     })
   } catch {
     throw new Error(
@@ -183,30 +176,4 @@ export function getTeamLogoUrl(
   }
 
   return logoUrl
-}
-
-export function getAccuracy(input: AccuracyQuery): Promise<AccuracyReport> {
-  const params = new URLSearchParams()
-  for (const key of ['league_id', 'week', 'position', 'offset'] as const) {
-    const value = input[key]
-    if (value !== undefined) params.set(key, String(value))
-  }
-  return sendJson<AccuracyReport>(`/api/accuracy/${input.season}?${params}`, undefined, 'GET')
-}
-
-export function syncAccuracy(season: number, leagueId?: number): Promise<AccuracySyncResult> {
-  const query = leagueId === undefined ? '' : `?league_id=${leagueId}`
-  return postJson<AccuracySyncResult>(`/api/accuracy/${season}/sync${query}`, {})
-}
-
-export function getAutomationStatus(season: number, leagueId?: number): Promise<AutomationStatus> {
-  const query = leagueId === undefined ? '' : `?league_id=${leagueId}`
-  return sendJson<AutomationStatus>(`/api/accuracy/${season}/automation${query}`, undefined, 'GET')
-}
-
-export function getLiveScores(input: { league_id: number; season: number; week: number;
-  players: LivePlayerDescriptor[] }, mode: 'public' | 'local'): Promise<LiveScoreResponse> {
-  const { week, players } = input
-  return postJson<LiveScoreResponse>(mode === 'local' ? '/api/espn/local/live' : '/api/espn/live',
-    mode === 'local' ? { week, players } : input)
 }

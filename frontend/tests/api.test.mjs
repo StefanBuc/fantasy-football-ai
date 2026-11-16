@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getLiveScores } from '../src/lib/api.ts'
+import { getTeamProjections } from '../src/lib/api.ts'
 
 const input = { league_id: 1, season: 2026, team_id: 1, week: 8 }
 
@@ -26,44 +26,4 @@ test('failed requests can be retried', async (t) => {
   fetch.mock.mockImplementation(() => Promise.resolve(new Response('{}')))
   await getTeamProjections(input)
   assert.equal(fetch.mock.callCount(), 2)
-})
-
-test('accuracy reads use GET with filters and sync uses POST for the selected league', async (t) => {
-  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))
-  await getAccuracy({ season: 2026, league_id: 123, week: 10, position: 'QB', offset: 100 })
-  const [path, options] = fetch.mock.calls[0].arguments
-  assert.equal(path, '/api/accuracy/2026?league_id=123&week=10&position=QB&offset=100')
-  assert.equal(options.method, 'GET')
-  assert.equal(options.body, undefined)
-  await syncAccuracy(2026, 123)
-  assert.equal(fetch.mock.calls[1].arguments[0], '/api/accuracy/2026/sync?league_id=123')
-  assert.equal(fetch.mock.calls[1].arguments[1].method, 'POST')
-})
-
-test('accuracy displays backend sync errors so saved data is not mistaken for empty history', async (t) => {
-  t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response(
-    JSON.stringify({ detail: 'Results could not be synced. Saved predictions are preserved; try again later.' }),
-    { status: 503 },
-  )))
-  await assert.rejects(syncAccuracy(2026), /Saved predictions are preserved/)
-})
-
-test('automation status reads only the selected history scope', async (t) => {
-  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{"enabled":true}')))
-  assert.deepEqual(await getAutomationStatus(2026, 123), { enabled: true })
-  assert.equal(fetch.mock.calls[0].arguments[0], '/api/accuracy/2026/automation?league_id=123')
-  assert.equal(fetch.mock.calls[0].arguments[1].method, 'GET')
-  assert.equal(fetch.mock.calls[0].arguments[1].body, undefined)
-  await getAutomationStatus(2026)
-  assert.equal(fetch.mock.calls[1].arguments[0], '/api/accuracy/2026/automation')
-})
-
-test('live scores use their lightweight endpoint and local requests omit public connection fields', async (t) => {
-  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))
-  const players = [{ espn_id: -16002, player_id: 'BUF', position: 'D/ST', team: 'BUF' }]
-  await getLiveScores({ league_id: 123, season: 2026, week: 10, players }, 'public')
-  assert.equal(fetch.mock.calls[0].arguments[0], '/api/espn/live')
-  await getLiveScores({ league_id: 123, season: 2026, week: 10, players }, 'local')
-  assert.equal(fetch.mock.calls[1].arguments[0], '/api/espn/local/live')
-  assert.deepEqual(JSON.parse(fetch.mock.calls[1].arguments[1].body), { week: 10, players })
 })

@@ -9,11 +9,8 @@ import type {
   ESPNLeague,
   LeaguePlayer,
   LeaguePlayersResponse,
-  LivePlayerScore,
 } from '../types/api'
 import type { ConnectionMode } from './LeagueDashboard'
-import { PlayerScore, LiveScoreNote } from './PlayerScore'
-import { useLiveScores } from '../lib/useLiveScores'
 
 type PlayersViewProps = {
   league: ESPNLeague
@@ -55,7 +52,7 @@ function healthLabel(player: LeaguePlayer): string | null {
     : player.availability
 }
 
-function PlayerPoolRow({ player, live }: { player: LeaguePlayer; live?: LivePlayerScore }) {
+function PlayerPoolRow({ player }: { player: LeaguePlayer }) {
   const injury = healthLabel(player)
   const isAvailable = player.roster_status === 'available'
   const fallbackLabel = player.projection_method === 'recent_average'
@@ -65,7 +62,7 @@ function PlayerPoolRow({ player, live }: { player: LeaguePlayer; live?: LivePlay
       : null
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_100px] gap-3 border-t border-slate-100 px-4 py-4 first:border-t-0 dark:border-slate-800 sm:grid-cols-[minmax(210px,1.4fr)_90px_140px_80px_90px_100px] sm:items-center sm:px-6">
+    <div className="grid grid-cols-[minmax(0,1fr)_80px] gap-3 border-t border-slate-100 px-4 py-4 first:border-t-0 dark:border-slate-800 sm:grid-cols-[minmax(210px,1.4fr)_90px_140px_80px_90px_90px] sm:items-center sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
         <span className={`inline-flex w-12 shrink-0 justify-center rounded-lg px-2 py-1 text-xs font-black ${positionStyles[player.position] ?? positionStyles['D/ST']}`}>
           {player.position}
@@ -97,9 +94,16 @@ function PlayerPoolRow({ player, live }: { player: LeaguePlayer; live?: LivePlay
       </div>
 
       <div className="text-right sm:order-last">
-        <PlayerScore player={player} live={live} />
+        <p
+          className="text-xl font-black tabular-nums text-slate-950 dark:text-white"
+          title={player.projection_reason ?? undefined}
+        >
+          {player.predicted_points !== null
+            ? player.predicted_points.toFixed(1)
+            : '—'}
+        </p>
         <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-          {fallbackLabel ?? ''}
+          {fallbackLabel ?? 'AI points'}
         </p>
       </div>
 
@@ -250,9 +254,6 @@ export function PlayersView({
       }) ?? []
   }, [playerPool, position, rosterFilter, search, sortBy, team])
 
-  const live = useLiveScores(league.league_id, league.season, week, connectionMode,
-    playerPool?.week === week ? filteredPlayers : [])
-
   return (
     <section>
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-7">
@@ -401,7 +402,6 @@ export function PlayersView({
         </div>
       )}
 
-      {playerPool && <LiveScoreNote data={live.data} error={live.error} />}
       {playerPool && (
         <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-4 py-4 dark:border-slate-800 dark:bg-slate-900 sm:px-6">
@@ -418,18 +418,18 @@ export function PlayersView({
             </p>
           </div>
 
-          <div className="hidden grid-cols-[minmax(210px,1.4fr)_90px_140px_80px_90px_100px] gap-3 border-b border-slate-100 px-6 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400 dark:border-slate-800 sm:grid">
+          <div className="hidden grid-cols-[minmax(210px,1.4fr)_90px_140px_80px_90px_90px] gap-3 border-b border-slate-100 px-6 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400 dark:border-slate-800 sm:grid">
             <span>Player</span>
             <span>Status</span>
             <span>Fantasy team</span>
             <span className="text-right">Rostered</span>
             <span className="text-right">Season avg.</span>
-            <span className="text-right">Score / AI</span>
+            <span className="text-right">AI proj.</span>
           </div>
 
           {filteredPlayers.length > 0 ? (
             filteredPlayers.map((player) => (
-              <PlayerPoolRow key={player.espn_id} player={player} live={live.scores.get(player.espn_id)} />
+              <PlayerPoolRow key={player.espn_id} player={player} />
             ))
           ) : (
             <div className="px-6 py-14 text-center">
