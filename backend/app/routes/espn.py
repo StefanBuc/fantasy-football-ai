@@ -54,6 +54,8 @@ from app.services.score_presentation import prediction_display
 from app.services.live_scores import live_response, LiveLeagueClient
 from app.services.matchup_probability import estimate_win_chance
 from app.services.lineup_optimizer import optimize_lineup
+from app.schemas.trade import LocalTradeRequest, TradeRequest, TradeRosters, TradeAnalysis
+from app.services.trade_analyzer import analyze_trade
 from app.services.result_cache import ResultCache
 from espn_api.football.constant import POSITION_MAP
 from app.services.espn_connection_cache import espn_connection_cache
@@ -991,6 +993,89 @@ def build_optimized_lineup(league, league_id, season, team_id, week, include_fre
     return OptimizedLineupResponse(season=season, week=week, team_id=team_id,
         team_name=str(team.team_name), include_free_agents=include_free_agents,
         generated_at=datetime.now(timezone.utc), **result)
+
+
+def build_trade_rosters(league):
+    return TradeRosters(teams=[{
+        "team_id": int(team.team_id), "team_name": str(team.team_name),
+        "players": [{"espn_id": int(player.playerId), "player_name": str(player.name),
+                     "position": str(player.position), "team": player_pro_team(player),
+                     "injury_status": normalize_injury_status(getattr(player, "injuryStatus", None))}
+                    for player in team.roster if str(player.position).upper() in PLAYER_POOL_POSITIONS],
+    } for team in league.teams])
+
+
+def trade_week_profiles(league, league_id, season, week, service):
+    key = (league_id, season, week, f"{roster_fingerprint(league, week)}:{getattr(service, 'generation', '')}")
+    projection, _ = projection_cache.get_or_create(key, lambda: build_league_week_projection(
+        league=league, service=service, season=season, week=week, normalize_team=normalize_espn_team))
+    profiles = {}
+    for team in league.teams:
+        raw = {int(player.playerId): player for player in team.roster}
+        players = []
+        for item in projection.team_projections.get(int(team.team_id), ()):
+            source = raw.get(item.espn_id)
+            injury = normalize_injury_status(getattr(source, "injuryStatus", None))
+            availability = classify_availability(injury)
+            players.append(OptimizerPlayer(
+                espn_id=item.espn_id, player_id=item.player_id, player_name=item.player_name,
+                position=item.position, team=item.team, opponent_team=item.opponent_team,
+                current_slot=str(getattr(source, "lineupSlot", item.lineup_slot) or "BE"),
+                eligible_slots=list(getattr(source, "eligibleSlots", []) or []),
+                status=item.status, projection_method=item.projection_method,
+                predicted_points=0.0 if item.is_on_bye or availability == "unavailable" else item.predicted_points,
+                is_on_bye=item.is_on_bye, availability=availability, injury_status=injury,
+            ))
+        profiles[int(team.team_id)] = [OptimizerPlayer(**item) for item in prediction_display(
+            service, season, week, f"espn:{league_id}", [p.model_dump() for p in players])]
+    return profiles
+
+
+def build_trade_analysis(league, league_id, season, payload):
+    # Validate live ownership before loading season data or running forecasts.
+    for team_id, ids in ((payload.team_a_id, payload.team_a_player_ids), (payload.team_b_id, payload.team_b_player_ids)):
+        team = find_league_team(league, team_id)
+        if not set(ids).issubset({int(p.playerId) for p in team.roster}):
+            raise HTTPException(status_code=400, detail="A selected player is no longer on the sending team. Reload rosters and select the trade again.")
+    try:
+        counts = optimizer_slot_counts(league, league_id, season)
+        # Reject unsupported settings before expensive model work.
+        optimize_lineup([], counts)
+        service = get_espn_projection_service(season)
+        schedule = service.data.schedule
+        available_weeks = set(schedule.loc[(schedule["season"] == season) & (schedule["game_type"] == "REG"), "week"].astype(int))
+        if not set(range(payload.week, payload.end_week + 1)).issubset(available_weeks):
+            raise ValueError("The NFL regular-season schedule does not cover every selected week. Adjust the effective or last week.")
+        return analyze_trade(season=season, request=payload,
+            team_names={int(t.team_id): str(t.team_name) for t in league.teams}, slot_counts=counts,
+            load_week=lambda week: trade_week_profiles(league, league_id, season, week, service))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except (ESPNUnknownError, ESPNAccessDenied) as error:
+        raise HTTPException(status_code=502, detail="ESPN trade data could not be loaded. Try again shortly.") from error
+
+
+@router.post("/trade-rosters", response_model=TradeRosters)
+def get_public_trade_rosters(payload: ESPNLeagueConnectRequest):
+    return build_trade_rosters(get_public_league(league_id=payload.league_id, season=payload.season))
+
+
+@router.post("/local/trade-rosters", response_model=TradeRosters, include_in_schema=False)
+def get_local_trade_rosters(request: Request):
+    _, league = get_configured_private_league(request)
+    return build_trade_rosters(league)
+
+
+@router.post("/trade-analysis", response_model=TradeAnalysis)
+def get_public_trade_analysis(payload: TradeRequest):
+    league = get_public_league(league_id=payload.league_id, season=payload.season)
+    return build_trade_analysis(league, payload.league_id, payload.season, payload)
+
+
+@router.post("/local/trade-analysis", response_model=TradeAnalysis, include_in_schema=False)
+def get_local_trade_analysis(payload: LocalTradeRequest, request: Request):
+    config, league = get_configured_private_league(request)
+    return build_trade_analysis(league, config.league_id, config.season, payload)
 
 
 @router.post("/optimized-lineup", response_model=OptimizedLineupResponse)

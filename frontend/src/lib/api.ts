@@ -16,6 +16,9 @@ import type {
   TeamProjectionInput,
   TeamProjectionResponse,
   OptimizedLineupResponse,
+  TradeAnalysis,
+  TradeInput,
+  TradeRosters,
 } from '../types/api'
 
 const API_BASE_URL = (
@@ -226,4 +229,15 @@ export function getOptimizedLineup(input: TeamProjectionInput & { include_free_a
     ? '/api/espn/local/optimized-lineup' : '/api/espn/optimized-lineup', mode === 'local'
     ? { team_id: input.team_id, week: input.week, include_free_agents: input.include_free_agents, refresh: input.refresh ?? false }
     : input)
+}
+
+export function getTradeRosters(input: ConnectLeagueInput, mode: 'public' | 'local'): Promise<TradeRosters> {
+  return postJson<TradeRosters>(mode === 'local' ? '/api/espn/local/trade-rosters' : '/api/espn/trade-rosters',
+    mode === 'local' ? {} : input)
+}
+
+export function analyzeTrade(input: TradeInput, mode: 'public' | 'local'): Promise<TradeAnalysis> {
+  const { league_id, season, ...localInput } = input
+  return postJson<TradeAnalysis>(mode === 'local' ? '/api/espn/local/trade-analysis' : '/api/espn/trade-analysis',
+    mode === 'local' ? localInput : { league_id, season, ...localInput })
 }

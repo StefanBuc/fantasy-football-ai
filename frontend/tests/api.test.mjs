@@ -1,8 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getLiveScores, getOptimizedLineup } from '../src/lib/api.ts'
+import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getLiveScores, getOptimizedLineup, getTradeRosters, analyzeTrade } from '../src/lib/api.ts'
 
 const input = { league_id: 1, season: 2026, team_id: 1, week: 8 }
+
+test('trade roster selection is separate from analysis and local requests omit connection fields', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))
+  const connection = { league_id: 1, season: 2026 }
+  await getTradeRosters(connection, 'public')
+  assert.equal(fetch.mock.calls[0].arguments[0], '/api/espn/trade-rosters')
+  assert.deepEqual(JSON.parse(fetch.mock.calls[0].arguments[1].body), connection)
+  await getTradeRosters(connection, 'local')
+  assert.equal(fetch.mock.calls[1].arguments[0], '/api/espn/local/trade-rosters')
+  assert.deepEqual(JSON.parse(fetch.mock.calls[1].arguments[1].body), {})
+  const trade = { team_a_id: 1, team_b_id: 2, team_a_player_ids: [-16002, 50], team_b_player_ids: [51], week: 13, end_week: 17 }
+  await analyzeTrade({ ...connection, ...trade }, 'public')
+  assert.equal(fetch.mock.calls[2].arguments[0], '/api/espn/trade-analysis')
+  assert.deepEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body), { ...connection, ...trade })
+  await analyzeTrade({ ...connection, ...trade }, 'local')
+  assert.equal(fetch.mock.calls[3].arguments[0], '/api/espn/local/trade-analysis')
+  assert.deepEqual(JSON.parse(fetch.mock.calls[3].arguments[1].body), trade)
+})
 
 test('optimizer sends the free-agent choice and keeps private requests local', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))

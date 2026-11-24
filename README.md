@@ -14,8 +14,9 @@ The application currently supports projections for quarterbacks, running backs, 
 - Generates batched weekly projections through a FastAPI API.
 - Connects public ESPN leagues and locally configured private ESPN leagues.
 - Maps ESPN players to NFL/GSIS identifiers and projects complete fantasy rosters.
-- Displays My Team, Optimized lineup, Matchup, Players, League, and Accuracy views in a React frontend.
+- Displays My Team, Optimized lineup, Trade analyzer, Matchup, Players, League, and Accuracy views in a React frontend.
 - Recommends the highest projected eligible lineup, with optional free-agent additions and explicit start/bench changes.
+- Evaluates trades using before/after optimized lineups, weekly and remaining-season projections, team needs, backup depth, and projected league power ranks.
 - Supports benches, IR slots, ESPN team logos, future-week selection, and dark mode.
 - Applies live ESPN injury availability on top of cached base projections.
 - Produces labelled cold-start fallbacks for players with fewer than five games.
@@ -218,6 +219,8 @@ All routers are registered in `backend/main.py`.
 | `POST` | `/api/espn/projections` | Project a public league team |
 | `POST` | `/api/espn/matchup` | Project both sides of a matchup |
 | `POST` | `/api/espn/optimized-lineup` | Optimize a team's lineup, optionally including free agents |
+| `POST` | `/api/espn/trade-rosters` | Load current team rosters for trade selection without model inference |
+| `POST` | `/api/espn/trade-analysis` | Compare a hypothetical trade's lineup and remaining-season impact |
 
 Local private-league equivalents are available under `/api/espn/local/*` when explicitly enabled.
 
@@ -230,6 +233,23 @@ Assignments use ESPN's starting slot counts and player eligibility, including FL
 This recommends changes for you to make in ESPN. It does not submit lineup changes, pickups, drops, or waiver claims. Projections use full-PPR offense and the app's K/DST scoring, so custom ESPN scoring can differ. Future-week suggestions use current rosters and injury statuses. Free-agent searches consider up to 1,000 available players; waiver priority, budgets, acquisition limits, and positional roster caps must still be checked in ESPN.
 
 The public endpoint accepts `league_id`, `season`, `team_id`, `week`, and optional `include_free_agents` (default `false`) and `refresh` (default `false`). The guarded local equivalent uses the configured league and accepts only the team, week, and options. Optimization reuses existing model/data caches, checks current ESPN rosters, and does not retain a browser session copy of recommendations. The open page rechecks when a recommended player's kickoff passes. Locked slots use saved pregame projections; without one, full totals stay unavailable while improvement can still be calculated for movable slots.
+
+## Trade analyzer
+
+Open **Trade analyzer**, choose two teams, and select the players each team sends. Choose an **Effective week** and **Last week to include** (for example, Week 17 if that is your fantasy championship). Select **Analyze trade** to compare:
+
+- Individual traded players' projected points for the effective week and the full selected horizon.
+- Each team's optimized starting-lineup points before/after the exchange, for the effective week, each later week, and the horizon total.
+- Position needs relative to the league's average starting-slot points, the incoming players who would start, and changes in eligible bench backups for the effective week.
+- Projected league power ranks before/after, based on average optimized starting-lineup points across the selected weeks. These measure roster strength rather than standings or playoff probability.
+
+The verdict compares **marginal starting-lineup improvement**, not the sum of the players exchanged. Trading a strong bench player for a needed starter can benefit both teams. Differences of no more than 0.5 points per week between the teams' gains are labelled fairly even. Byes, NFL opponents, ESPN slot counts, FLEX/Superflex eligibility, kickoff locks, and current injury/IR statuses are considered. If a traded player has already kicked off or has an unknown kickoff, choose a later effective week. Unequal packages and full rosters are allowed; no drops are chosen, no open roster space is checked, and no free-agent replacements are assumed.
+
+This uses the existing projection models, with currently available player histories for each upcoming opponent; it does not recursively invent future game results or need another model. Future health, returns from IR, NFL role changes, and injuries are unknown, so **remaining-season totals are scenarios using current health and roles**, not a validated season-long forecast. Review the per-week breakdown and choose a sensible horizon. AI points still use full-PPR offense and the app's K/DST rules, not custom ESPN scoring. Missing forecasts are shown as unavailable; full-horizon totals/verdicts remain incomplete rather than silently summing partial weeks. Power ranks are withheld when any team's full horizon is incomplete. Backup counts overlap when a player is eligible for multiple slot types.
+
+Roster selection is lightweight. Analysis builds each league/week once through the existing model projection cache, so the first multi-week analysis can take longer and subsequent proposals reuse those forecasts. Hypothetical rosters never change ESPN or write hypothetical values to prediction history. ESPN ownership is rechecked on submission. Trade processing delays, league vetoes, keeper/dynasty value, waiver pickups, and playoff simulations are outside this analysis.
+
+`POST /api/espn/trade-analysis` accepts `league_id`, `season`, `team_a_id`, `team_b_id`, `team_a_player_ids`, `team_b_player_ids`, `week`, and `end_week`. Each side sends 1–10 unique ESPN IDs, including negative D/ST IDs where applicable. The local endpoint uses the configured league and accepts the trade fields without connection fields. Both local trade routes retain the existing loopback/private-league access checks.
 
 ## Training models
 

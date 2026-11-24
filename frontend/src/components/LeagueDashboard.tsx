@@ -22,9 +22,10 @@ import { AccuracyView } from './AccuracyView'
 import { PlayerScore, LiveScoreNote } from './PlayerScore'
 import { useLiveScores } from '../lib/useLiveScores'
 import { OptimizedLineupView } from './OptimizedLineupView'
+import { TradeAnalyzerView } from './TradeAnalyzerView'
 
 export type ConnectionMode = 'public' | 'local'
-type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy' | 'optimized'
+type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy' | 'optimized' | 'trade'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
@@ -437,6 +438,7 @@ export function LeagueDashboard({
           {([
             ['team', 'My team'],
             ['optimized', 'Optimized lineup'],
+            ['trade', 'Trade analyzer'],
             ['matchup', 'Matchup'],
             ['players', 'Players'],
             ['league', 'League'],
@@ -636,6 +638,10 @@ export function LeagueDashboard({
 
         {activeView === 'optimized' && <OptimizedLineupView league={league} connectionMode={connectionMode}
           selectedTeamId={selectedTeamId} week={week} onTeamChange={changeTeam} onWeekChange={changeWeek} />}
+
+        {activeView === 'trade' && <TradeAnalyzerView key={`${connectionMode}:${league.league_id}:${league.season}`}
+          league={league} connectionMode={connectionMode} selectedTeamId={selectedTeamId} week={week}
+          onTeamChange={changeTeam} onWeekChange={changeWeek} />}
 
         {activeView === 'players' && (
           <PlayersView

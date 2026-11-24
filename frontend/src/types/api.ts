@@ -325,3 +325,69 @@ export type OptimizedLineupResponse = {
   changes: LineupChange[]
   notes: string[]
 }
+
+export type TradeRosterPlayer = {
+  espn_id: number
+  player_name: string
+  position: string
+  team: string | null
+  injury_status: string | null
+}
+
+export type TradeRosters = {
+  teams: { team_id: number; team_name: string; players: TradeRosterPlayer[] }[]
+}
+
+export type TradeInput = {
+  league_id: number
+  season: number
+  team_a_id: number
+  team_b_id: number
+  team_a_player_ids: number[]
+  team_b_player_ids: number[]
+  week: number
+  end_week: number
+}
+
+export type TradePlayerValue = TradeRosterPlayer & {
+  from_team_id: number
+  weekly_points: number | null
+  rest_of_season_points: number | null
+  projected_games: number
+  missing_weeks: number
+}
+
+export type TradeTeamImpact = {
+  team_id: number
+  team_name: string
+  weekly_before: number | null
+  weekly_after: number | null
+  weekly_change: number | null
+  rest_before: number | null
+  rest_after: number | null
+  rest_change: number | null
+  weeks_covered: number
+  power_rank_before: number | null
+  power_rank_after: number | null
+  lineup_before: OptimizedSlot[]
+  lineup_after: OptimizedSlot[]
+  positions: { slot: string; before_points: number | null; after_points: number | null;
+    league_average: number | null; backups_before: number; backups_after: number }[]
+  weeks: { week: number; before_points: number | null; after_points: number | null; change: number | null }[]
+  explanations: string[]
+}
+
+export type TradeAnalysis = {
+  season: number
+  week: number
+  end_week: number
+  generated_at: string
+  verdict: string
+  favors_team_id: number | null
+  summary: string
+  players: TradePlayerValue[]
+  teams: TradeTeamImpact[]
+  power_rankings: { team_id: number; team_name: string; before_points: number | null;
+    after_points: number | null; rank_before: number | null; rank_after: number | null }[]
+  notes: string[]
+}
