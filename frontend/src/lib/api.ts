@@ -15,6 +15,7 @@ import type {
   ScoreboardResponse,
   TeamProjectionInput,
   TeamProjectionResponse,
+  OptimizedLineupResponse,
 } from '../types/api'
 
 const API_BASE_URL = (
@@ -217,4 +218,12 @@ export function getLiveScores(input: { league_id: number; season: number; week: 
   const { week, players } = input
   return postJson<LiveScoreResponse>(mode === 'local' ? '/api/espn/local/live' : '/api/espn/live',
     mode === 'local' ? { week, players } : input)
+}
+
+export function getOptimizedLineup(input: TeamProjectionInput & { include_free_agents: boolean },
+  mode: 'public' | 'local'): Promise<OptimizedLineupResponse> {
+  return postJson<OptimizedLineupResponse>(mode === 'local'
+    ? '/api/espn/local/optimized-lineup' : '/api/espn/optimized-lineup', mode === 'local'
+    ? { team_id: input.team_id, week: input.week, include_free_agents: input.include_free_agents, refresh: input.refresh ?? false }
+    : input)
 }

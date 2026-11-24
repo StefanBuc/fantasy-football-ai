@@ -1,6 +1,7 @@
 from typing import Any, Literal
 from datetime import datetime, timezone
 import json
+from hashlib import sha256
 from urllib.parse import urlparse
 
 import requests as http_requests
@@ -38,6 +39,10 @@ from app.schemas.espn import (
     ESPNLiveRequest,
     ESPNLocalLiveRequest,
     ESPNLiveResponse,
+    ESPNOptimizeRequest,
+    ESPNLocalOptimizeRequest,
+    OptimizerPlayer,
+    OptimizedLineupResponse,
 )
 from app.services.weekly_projection_service import (
     WeeklyProjectionService,
@@ -48,6 +53,9 @@ from app.services.accuracy_jobs import register_league_tracking
 from app.services.score_presentation import prediction_display
 from app.services.live_scores import live_response, LiveLeagueClient
 from app.services.matchup_probability import estimate_win_chance
+from app.services.lineup_optimizer import optimize_lineup
+from app.services.result_cache import ResultCache
+from espn_api.football.constant import POSITION_MAP
 from app.services.espn_connection_cache import espn_connection_cache
 from app.services.espn_projection_cache import (
     ESPNProjectionCache,
@@ -75,6 +83,7 @@ ESPN_TEAM_ALIASES = {
 }
 
 projection_cache = ESPNProjectionCache(persistent=True)
+optimizer_settings_cache = ResultCache(ttl_seconds=900, max_entries=16, name="optimizer_settings")
 
 PLAYER_POOL_POSITIONS = {
     "QB",
@@ -170,6 +179,8 @@ def build_league_player(
     )
 
     return ESPNLeaguePlayerResponse(
+        eligible_slots=list(getattr(player, "eligibleSlots", []) or []),
+        lineup_slot=str(getattr(player, "lineupSlot", "") or "BE"),
         espn_id=int(player.playerId),
         player_name=str(player.name),
         position=position,
@@ -935,6 +946,69 @@ def build_team_projection_response(
         skipped_count=len(players) - projected_count,
         players=players,
     )
+
+
+def optimizer_slot_counts(league, league_id, season):
+    cookies = getattr(getattr(league, "espn_request", None), "cookies", None)
+    key = (league_id, season, sha256(repr(cookies).encode()).hexdigest())
+    def load():
+        raw = league.espn_request.league_get(params={"view": "mSettings"})
+        counts = raw.get("settings", {}).get("rosterSettings", {}).get("lineupSlotCounts", {})
+        if not counts:
+            raise ValueError("ESPN did not return lineup slot settings.")
+        return {POSITION_MAP.get(int(slot), f"Slot {slot}"): int(count) for slot, count in counts.items()}
+    return optimizer_settings_cache.get_or_create(key, load)
+
+
+def build_optimized_lineup(league, league_id, season, team_id, week, include_free_agents, refresh=False):
+    team = find_league_team(league, team_id)
+    try:
+        if refresh:
+            optimizer_settings_cache.clear()
+        counts = optimizer_slot_counts(league, league_id, season)
+        service = projection_services.get(season, refresh=True) if refresh else get_espn_projection_service(season)
+        if include_free_agents:
+            pool = build_league_players_response(league, league_id, season, week)
+            sources = [player for player in pool.players
+                       if player.fantasy_team_id == team_id or player.roster_status == "available"]
+            candidates = [OptimizerPlayer(**{
+                **player.model_dump(), "current_slot": player.lineup_slot,
+                "is_free_agent": player.roster_status == "available", "status": player.projection_status,
+            }) for player in sources]
+        else:
+            projected = build_team_projection_response(league, league_id, season, team_id, week, service)
+            raw_players = {int(player.playerId): player for player in team.roster}
+            candidates = [OptimizerPlayer(**{
+                **player.model_dump(), "current_slot": player.lineup_slot,
+                "eligible_slots": list(getattr(raw_players.get(player.espn_id), "eligibleSlots", []) or []),
+                "is_free_agent": False,
+            }) for player in projected.players]
+        result = optimize_lineup(candidates, counts)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except (ESPNUnknownError, ESPNAccessDenied) as error:
+        raise HTTPException(status_code=502, detail="ESPN lineup settings or player availability could not be loaded.") from error
+    return OptimizedLineupResponse(season=season, week=week, team_id=team_id,
+        team_name=str(team.team_name), include_free_agents=include_free_agents,
+        generated_at=datetime.now(timezone.utc), **result)
+
+
+@router.post("/optimized-lineup", response_model=OptimizedLineupResponse)
+def get_public_optimized_lineup(payload: ESPNOptimizeRequest):
+    if payload.refresh:
+        espn_connection_cache.clear()
+    league = get_public_league(league_id=payload.league_id, season=payload.season)
+    return build_optimized_lineup(league, payload.league_id, payload.season, payload.team_id,
+                                 payload.week, payload.include_free_agents, payload.refresh)
+
+
+@router.post("/local/optimized-lineup", response_model=OptimizedLineupResponse, include_in_schema=False)
+def get_local_optimized_lineup(payload: ESPNLocalOptimizeRequest, request: Request):
+    if payload.refresh:
+        espn_connection_cache.clear()
+    config, league = get_configured_private_league(request)
+    return build_optimized_lineup(league, config.league_id, config.season, payload.team_id,
+                                 payload.week, payload.include_free_agents, payload.refresh)
 
 
 @router.post("/connect", response_model=ESPNLeagueConnectResponse)

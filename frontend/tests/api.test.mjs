@@ -1,8 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getLiveScores } from '../src/lib/api.ts'
+import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getLiveScores, getOptimizedLineup } from '../src/lib/api.ts'
 
 const input = { league_id: 1, season: 2026, team_id: 1, week: 8 }
+
+test('optimizer sends the free-agent choice and keeps private requests local', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))
+  await getOptimizedLineup({ ...input, include_free_agents: false }, 'public')
+  assert.equal(fetch.mock.calls[0].arguments[0], '/api/espn/optimized-lineup')
+  assert.deepEqual(JSON.parse(fetch.mock.calls[0].arguments[1].body), { ...input, include_free_agents: false })
+  await getOptimizedLineup({ ...input, include_free_agents: true }, 'local')
+  assert.equal(fetch.mock.calls[1].arguments[0], '/api/espn/local/optimized-lineup')
+  assert.deepEqual(JSON.parse(fetch.mock.calls[1].arguments[1].body), {
+    team_id: 1, week: 8, include_free_agents: true, refresh: false,
+  })
+})
 
 test('identical pending requests share one HTTP call', async (t) => {
   const deferred = Promise.withResolvers()

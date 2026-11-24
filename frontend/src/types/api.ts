@@ -111,6 +111,8 @@ export type MatchupResponse = {
 }
 
 export type LeaguePlayer = ProjectionDisplay & {
+  eligible_slots?: string[]
+  lineup_slot?: string | null
   player_id?: string | null
   espn_id: number
   player_name: string
@@ -275,4 +277,51 @@ export type LiveScoreResponse = {
   checked_at: string
   note: string
   players: LivePlayerScore[]
+}
+
+export type OptimizerPlayer = ProjectionDisplay & {
+  espn_id: number
+  player_id: string | null
+  player_name: string
+  position: string
+  team: string | null
+  opponent_team: string | null
+  predicted_points: number | null
+  current_slot: string | null
+  is_free_agent: boolean
+  is_on_bye: boolean
+  availability: string
+  injury_status: string | null
+  status: string
+  projection_method: string | null
+}
+
+export type OptimizedSlot = {
+  slot: string
+  player: OptimizerPlayer | null
+  locked: boolean
+  action: 'keep' | 'start' | 'add' | 'move' | 'empty' | 'locked'
+}
+
+export type LineupChange = {
+  action: 'bench' | 'start' | 'add' | 'move'
+  player: OptimizerPlayer
+  slot: string | null
+  reason: string
+}
+
+export type OptimizedLineupResponse = {
+  season: number
+  week: number
+  team_id: number
+  team_name: string
+  include_free_agents: boolean
+  generated_at: string
+  current_points: number | null
+  optimized_points: number | null
+  improvement: number | null
+  lineup: OptimizedSlot[]
+  bench: OptimizerPlayer[]
+  changes: LineupChange[]
+  notes: string[]
 }

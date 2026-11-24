@@ -54,6 +54,14 @@ class ESPNLocalTeamProjectionRequest(BaseModel):
     week: int = Field(ge=1, le=18)
 
 
+class ESPNOptimizeRequest(ESPNTeamProjectionRequest):
+    include_free_agents: bool = False
+
+
+class ESPNLocalOptimizeRequest(ESPNLocalTeamProjectionRequest):
+    include_free_agents: bool = False
+
+
 class ESPNLeaguePlayersRequest(BaseModel):
     league_id: int = Field(gt=0)
     season: int = Field(
@@ -78,6 +86,8 @@ class ProjectionDisplay(BaseModel):
 
 
 class ESPNLeaguePlayerResponse(ProjectionDisplay):
+    eligible_slots: list[str] = Field(default_factory=list)
+    lineup_slot: str | None = None
     player_id: str | None = None
     espn_id: int
     player_name: str
@@ -167,6 +177,54 @@ class ESPNTeamProjectionResponse(BaseModel):
     projected_count: int
     skipped_count: int
     players: list[ESPNRosterProjectionResponse]
+
+
+class OptimizerPlayer(ProjectionDisplay):
+    espn_id: int
+    player_id: str | None = None
+    player_name: str
+    position: str
+    team: str | None = None
+    opponent_team: str | None = None
+    predicted_points: float | None = None
+    eligible_slots: list[str] = Field(default_factory=list)
+    current_slot: str | None = None
+    is_free_agent: bool = False
+    is_on_bye: bool = False
+    availability: str = "unknown"
+    injury_status: str | None = None
+    projection_method: str | None = None
+    status: str = "skipped"
+
+
+class OptimizedSlot(BaseModel):
+    slot: str
+    player: OptimizerPlayer | None
+    locked: bool = False
+    action: Literal["keep", "start", "add", "move", "empty", "locked"]
+
+
+class LineupChange(BaseModel):
+    action: Literal["bench", "start", "add", "move"]
+    player: OptimizerPlayer
+    slot: str | None = None
+    reason: str
+
+
+class OptimizedLineupResponse(BaseModel):
+    season: int
+    week: int
+    team_id: int
+    team_name: str
+    include_free_agents: bool
+    generated_at: datetime
+    current_points: float | None
+    optimized_points: float | None
+    improvement: float | None
+    lineup: list[OptimizedSlot]
+    bench: list[OptimizerPlayer]
+    changes: list[LineupChange]
+    notes: list[str]
 
 
 class ESPNScoreboardMatchup(BaseModel):

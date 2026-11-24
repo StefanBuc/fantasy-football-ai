@@ -14,7 +14,8 @@ The application currently supports projections for quarterbacks, running backs, 
 - Generates batched weekly projections through a FastAPI API.
 - Connects public ESPN leagues and locally configured private ESPN leagues.
 - Maps ESPN players to NFL/GSIS identifiers and projects complete fantasy rosters.
-- Displays My Team, Matchup, and League views in a React frontend.
+- Displays My Team, Optimized lineup, Matchup, Players, League, and Accuracy views in a React frontend.
+- Recommends the highest projected eligible lineup, with optional free-agent additions and explicit start/bench changes.
 - Supports benches, IR slots, ESPN team logos, future-week selection, and dark mode.
 - Applies live ESPN injury availability on top of cached base projections.
 - Produces labelled cold-start fallbacks for players with fewer than five games.
@@ -216,8 +217,19 @@ All routers are registered in `backend/main.py`.
 | `POST` | `/api/espn/connect` | Connect a public ESPN league |
 | `POST` | `/api/espn/projections` | Project a public league team |
 | `POST` | `/api/espn/matchup` | Project both sides of a matchup |
+| `POST` | `/api/espn/optimized-lineup` | Optimize a team's lineup, optionally including free agents |
 
 Local private-league equivalents are available under `/api/espn/local/*` when explicitly enabled.
+
+## Optimized lineup
+
+Open **Optimized lineup** after connecting your league, then choose a team and week. By default it uses only that team's players. Turn on **Include free agents** to consider ESPN's available-player pool as well. The page shows the recommended starters and bench, who to start or bench, and projected point improvement. Suggested additions show **(Free agent)** beside the player's name; some require a waiver claim rather than an immediate pickup. Better free agents are recommended even if the roster is full, including one-week upgrades. The optimizer does not check open roster space or select drops; managers choose whom to drop.
+
+Assignments use ESPN's starting slot counts and player eligibility, including FLEX and Superflex, and maximize total projected points without using anyone twice. Players whose games have started stay in their current slots; started bench players cannot be promoted. Players with unknown kickoff times are also kept in place. Bye-week players, unavailable players, and IR players awaiting activation are excluded from new starter assignments. Questionable players remain eligible and show their injury status. Missing projections remain unavailable, and empty slots are shown explicitly. Unsupported starting positions such as IDP produce an explanatory error.
+
+This recommends changes for you to make in ESPN. It does not submit lineup changes, pickups, drops, or waiver claims. Projections use full-PPR offense and the app's K/DST scoring, so custom ESPN scoring can differ. Future-week suggestions use current rosters and injury statuses. Free-agent searches consider up to 1,000 available players; waiver priority, budgets, acquisition limits, and positional roster caps must still be checked in ESPN.
+
+The public endpoint accepts `league_id`, `season`, `team_id`, `week`, and optional `include_free_agents` (default `false`) and `refresh` (default `false`). The guarded local equivalent uses the configured league and accepts only the team, week, and options. Optimization reuses existing model/data caches, checks current ESPN rosters, and does not retain a browser session copy of recommendations. The open page rechecks when a recommended player's kickoff passes. Locked slots use saved pregame projections; without one, full totals stay unavailable while improvement can still be calculated for movable slots.
 
 ## Training models
 

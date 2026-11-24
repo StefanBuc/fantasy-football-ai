@@ -21,9 +21,10 @@ import { ProjectionFreshness } from './ProjectionFreshness'
 import { AccuracyView } from './AccuracyView'
 import { PlayerScore, LiveScoreNote } from './PlayerScore'
 import { useLiveScores } from '../lib/useLiveScores'
+import { OptimizedLineupView } from './OptimizedLineupView'
 
 export type ConnectionMode = 'public' | 'local'
-type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy'
+type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy' | 'optimized'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
@@ -435,6 +436,7 @@ export function LeagueDashboard({
         <nav className="mx-auto flex max-w-7xl gap-7 overflow-x-auto px-4 sm:px-8" aria-label="League navigation">
           {([
             ['team', 'My team'],
+            ['optimized', 'Optimized lineup'],
             ['matchup', 'Matchup'],
             ['players', 'Players'],
             ['league', 'League'],
@@ -444,7 +446,7 @@ export function LeagueDashboard({
               key={view}
               type="button"
               onClick={() => setActiveView(view)}
-              className={`border-b-2 pb-3 text-sm font-black transition ${
+              className={`shrink-0 whitespace-nowrap border-b-2 pb-3 text-sm font-black transition ${
                 activeView === view
                   ? 'border-lime-300 text-white'
                   : 'border-transparent text-slate-500 hover:text-slate-300'
@@ -631,6 +633,9 @@ export function LeagueDashboard({
         )}
 
         {activeView === 'accuracy' && <AccuracyView league={league} />}
+
+        {activeView === 'optimized' && <OptimizedLineupView league={league} connectionMode={connectionMode}
+          selectedTeamId={selectedTeamId} week={week} onTeamChange={changeTeam} onWeekChange={changeWeek} />}
 
         {activeView === 'players' && (
           <PlayersView
