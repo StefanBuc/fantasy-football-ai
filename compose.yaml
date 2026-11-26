@@ -32,7 +32,7 @@ services:
         bind:
           create_host_path: false
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-8090}:8080"
+      - "${FRONTEND_PORT:-8090}:8080"
       - "127.0.0.1:${BACKEND_PORT:-8091}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5)"]
