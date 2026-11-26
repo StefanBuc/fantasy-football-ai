@@ -155,7 +155,7 @@ From the repository root:
 docker compose up -d
 ```
 
-Open **http://localhost:8080** once the services are healthy (`docker compose ps`). API documentation is at **http://localhost:8000/docs**. Compose builds missing images automatically; the first build downloads Python, Node, and PyTorch's CUDA libraries. Models and data still load on their first uncached request; Docker does not make that download instant.
+Open **http://localhost:8090** once the services are healthy (`docker compose ps`). API documentation is at **http://localhost:8091/docs**. Host ports default to 8090 and 8091; container-internal ports remain 8080 and 8000, which do not conflict with other containers' ports. Compose builds missing images automatically; the first build downloads Python, Node, and PyTorch's CUDA libraries. Models and data still load on their first uncached request; Docker does not make that download instant.
 
 The model directory `backend/models/pytorch/` must exist and contain the selected checkpoints. It is mounted read-only rather than copied into an image. Credentials are read at runtime from `backend/.env`, when present; `.env` files, model files, and caches are excluded from image builds. For the private-league button, configure that file as described below, including `ESPN_ENABLE_LOCAL_API=true`. The frontend build explicitly enables the local-league option.
 
@@ -173,7 +173,13 @@ docker compose ps
 docker compose down
 ```
 
-For a port conflict, set `$env:FRONTEND_PORT = '8081'` or `$env:BACKEND_PORT = '8001'` before starting Compose. For source changes, run `docker compose up --build -d --wait` again; this setup uses built images rather than development hot reload.
+To override the host ports, set `FRONTEND_PORT` and `BACKEND_PORT` in a `.env` file beside `compose.yaml` (not `backend/.env`), or use environment variables. Existing overrides take precedence over the defaults. For example, on Linux:
+
+```bash
+FRONTEND_PORT=8092 BACKEND_PORT=8093 docker compose up -d
+```
+
+On PowerShell, set `$env:FRONTEND_PORT = '8092'` and `$env:BACKEND_PORT = '8093'` before starting Compose. After changing port mappings, run `docker compose up -d` to recreate the affected containers; no image rebuild is needed. For source changes, run `docker compose up --build -d --wait` again; this setup uses built images rather than development hot reload.
 
 The backend image is named `fantasy-football-ai-backend:gpu`. Models load lazily and select CUDA when available, otherwise CPU. To verify GPU access and run a CUDA operation:
 
