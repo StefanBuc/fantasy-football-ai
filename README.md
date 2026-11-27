@@ -14,6 +14,7 @@ The application currently supports projections for quarterbacks, running backs, 
 - Generates batched weekly projections through a FastAPI API.
 - Connects public ESPN leagues and locally configured private ESPN leagues.
 - Protects the public deployment with a single owner account, secure server-side sessions, and encrypted saved private-league connections.
+- Welcomes visitors with a public homepage, interactive sample previews, and aggregate model-performance tiles; signup stays closed.
 - Maps ESPN players to NFL/GSIS identifiers and projects complete fantasy rosters.
 - Displays My Team, Optimized lineup, Trade analyzer, Matchup, Players, League, and Accuracy views in a React frontend.
 - Recommends the highest projected eligible lineup, with optional free-agent additions and explicit start/bench changes.
@@ -146,6 +147,14 @@ npm run lint
 npm run build
 ```
 
+## Public site and sign-in
+
+With authentication enabled (the default), `/` is the public homepage. Visitors can explore features, labelled fictional player/lineup/trade examples, and model-performance tiles without connecting a league. `/login` opens owner sign-in, `/app` opens the protected league dashboard, and `/signup` explains that registration is closed. The disabled signup buttons do not create accounts. The existing owner account and saved leagues continue to work; signed-in visitors can return home and reopen their dashboard.
+
+The anonymous `GET /api/public/performance` endpoint reads aggregate results for the current NFL season from saved NFL-wide predictions (`scope='weekly'`). It excludes all ESPN league records, player names, account details, and credentials. Tiles show mean absolute error, the percentage of graded forecasts within five points, the number graded, and the last result update. They disclose sample size, scoring, and model/fallback coverage. These are full-PPR projections with the app's kicker/D/ST scoring, rather than a particular league's scoring settings. If there are no graded NFL-wide results, the page shows a collecting state instead of invented accuracy figures.
+
+The endpoint reads existing history without loading models, running predictions, or creating a database. Summaries are cached for 60 seconds on the server; the homepage refreshes them every five minutes and when its tab becomes visible. The existing background prediction/result jobs supply this history while the backend runs. Private league accuracy remains in the authenticated Accuracy tab. Public pages do not fetch private league connections or projections.
+
 ## Docker setup
 
 Docker Desktop must be running with Linux containers. Use Compose 2.24 or newer for optional environment files. This runs a built React frontend through Nginx and a FastAPI backend, with CUDA-enabled PyTorch 2.15. The single `compose.yaml` requests your NVIDIA GPU by default. Windows GPU access requires Docker Desktop's WSL 2 backend and compatible NVIDIA drivers; see [Docker's GPU setup](https://docs.docker.com/desktop/features/gpu/).
@@ -160,7 +169,7 @@ Host ports default to 8090 for the frontend and loopback-only 8091 for the API; 
 
 The model directory `backend/models/pytorch/` must exist and contain the selected checkpoints. It is mounted read-only rather than copied into an image. Optional configuration is read from `backend/.env`; `.env` files, model files, databases, and caches are excluded from image builds. Add private leagues in the authenticated UI. An existing environment-configured league can be imported there without retyping its credentials.
 
-The frontend shares the backend's network namespace and proxies API calls through `127.0.0.1`. **Loopback is not authentication:** every data route, including `/api/espn/local/*`, now requires an owner session in the default configuration. Only minimal health checks and session/login entry points are anonymous. The API port remains bound to loopback. Restrict access to frontend port 8090 to your tunnel/reverse proxy using the server firewall where appropriate; an externally reachable HTTP port is not a substitute for HTTPS.
+The frontend shares the backend's network namespace and proxies API calls through `127.0.0.1`. **Loopback is not authentication:** private data routes, including `/api/espn/local/*`, require an owner session in the default configuration. Minimal health checks, session/login entry points, and the aggregate `/api/public/performance` summary are anonymous. The API port remains bound to loopback. Restrict access to frontend port 8090 to your tunnel/reverse proxy using the server firewall where appropriate; an externally reachable HTTP port is not a substitute for HTTPS.
 
 On your server, after updating the source:
 

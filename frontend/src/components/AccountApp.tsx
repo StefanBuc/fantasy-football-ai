@@ -8,6 +8,9 @@ import { deleteConnection, getConnections, getSession, importConfiguredLeague, s
   saveConnectionPreferences, saveOwnerPreferences, signIn, signOut,
   type DashboardView, type OwnerPreferences, type OwnerSession, type SavedConnection } from '../lib/account'
 import type { ESPNLeague } from '../types/api'
+import { navigate, useSitePath } from '../lib/navigation'
+import { PublicSite, SiteLink } from './PublicSite'
+import { SignInPage } from './SignInPage'
 
 const panel = 'rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'
 const field = 'mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm outline-none focus:border-emerald-500'
@@ -17,6 +20,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : 'Th
 const currentSeason = new Date().getFullYear()
 
 export default function AccountApp() {
+  const path = useSitePath()
   const [session, setSession] = useState<OwnerSession | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -60,6 +64,7 @@ export default function AccountApp() {
       setDashboard(null); setConnections([]); setPassword(''); setSwid(''); setS2('')
       setBusy(false)
       setSession(null); setError('Your session expired. Please sign in again.')
+      if (window.location.pathname === '/app') navigate('/login', true)
       void refreshSession()
     }
     window.addEventListener('fantasy-session-expired', expired)
@@ -69,6 +74,12 @@ export default function AccountApp() {
   useEffect(() => {
     if (session?.auth_enabled) document.documentElement.classList.toggle('dark', isDark)
   }, [isDark, session?.auth_enabled])
+
+  useEffect(() => {
+    if (!session || !session.auth_enabled) return
+    if (path === '/app' && !session.authenticated) navigate('/login', true)
+    else if (path === '/login' && session.authenticated) navigate('/app', true)
+  }, [path, session])
 
   function persistPreferences(updates: Partial<OwnerPreferences>) {
     const previous = preferencesRef.current
@@ -94,7 +105,7 @@ export default function AccountApp() {
   }
 
   useEffect(() => {
-    if (!session?.authenticated) return
+    if (!session?.authenticated || path !== '/app') return
     let active = true
     const load = async () => {
       setBusy(true)
@@ -111,7 +122,7 @@ export default function AccountApp() {
     return () => { active = false }
     // Load account state once after sign-in; changing preferences must not reopen a league.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.authenticated])
+  }, [session?.authenticated, path])
 
   async function login(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(null)
@@ -119,6 +130,7 @@ export default function AccountApp() {
       const next = await signIn(username.trim(), password, remember)
       configureSession(next.csrf_token ?? '', true)
       setPassword(''); viewCache.clear(); setSession({ ...session, ...next })
+      navigate('/app', true)
     } catch (caught) { setError(message(caught)); setPassword('') }
     finally { setBusy(false) }
   }
@@ -131,6 +143,7 @@ export default function AccountApp() {
     configureSession('', false); setActiveConnection(null); viewCache.clear()
     setDashboard(null); setConnections([]); setPreferences(null); preferencesRef.current = null
     setSession(null); setPassword(''); setSwid(''); setS2(''); setBusy(false)
+    navigate('/', true)
     await refreshSession()
   }
 
@@ -166,6 +179,11 @@ export default function AccountApp() {
   }
 
   if (session && !session.auth_enabled) return <LegacyApp />
+  if (path !== '/app' && path !== '/login') return <PublicSite authenticated={session?.authenticated} page={path} />
+  if (!session?.authenticated) return <SignInPage session={session} error={error} busy={busy}
+    username={username} password={password} remember={remember}
+    onUsername={setUsername} onPassword={setPassword} onRemember={setRemember}
+    onSubmit={(event) => void login(event)} onRetry={() => void refreshSession()} />
   if (dashboard && session?.authenticated) return <>
     {error && <p role="alert" className="bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     <LeagueDashboard key={dashboard.connection.id} league={dashboard.league}
@@ -177,31 +195,17 @@ export default function AccountApp() {
       }}
       onDisconnect={() => { setDashboard(null); setActiveConnection(null); viewCache.clear(); void reloadConnections().catch((caught) => setError(message(caught))) }}
       isDark={isDark} onToggleDark={() => persistPreferences({ theme: isDark ? 'light' : 'dark' })}
-      onSignOut={() => void logout()} />
+      onSignOut={() => void logout()} onHome={() => navigate('/')} />
   </>
 
-  const loginOrigin = session?.login_origin ?? session?.public_url
-  const wrongOrigin = loginOrigin && new URL(loginOrigin).origin !== window.location.origin
   return <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
     <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-4">
-      <div className="flex items-center gap-3"><img src="/logo.svg" alt="" className="size-10" /><div><p className="font-black">Fantasy Football AI</p><p className="text-xs text-slate-500">{session?.authenticated ? `Signed in as ${preferences?.username ?? username}` : 'Owner access'}</p></div></div>
+      <SiteLink href="/" className="flex items-center gap-3"><img src="/logo.svg" alt="" className="size-10" /><span><span className="block font-black">Fantasy Football AI</span><span className="block text-xs text-slate-500">Signed in as {preferences?.username ?? username}</span></span></SiteLink>
       {session?.authenticated && <div className="flex items-center gap-3"><ThemeToggle isDark={isDark} onToggle={() => persistPreferences({ theme: isDark ? 'light' : 'dark' })} /><button type="button" disabled={busy} onClick={() => void logout()} className={secondary}>Sign out</button></div>}
     </div></header>
     <main className="mx-auto max-w-6xl space-y-5 px-5 py-10">
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}{!session && <button type="button" className="ml-3 font-bold underline" onClick={() => void refreshSession()}>Retry</button>}</div>}
-      {!session ? <p role="status" className="text-center text-sm text-slate-500">Checking your session...</p> : !session.authenticated ?
-        <section className={`${panel} mx-auto max-w-md`}>
-          <h1 className="text-2xl font-black">Sign in</h1>
-          {wrongOrigin ? <p className="mt-4 text-sm leading-6">Use a configured address to sign in: <a href={loginOrigin} className="font-bold text-emerald-700 underline">{loginOrigin}</a></p>
-            : session.configured === false ? <div className="mt-4 space-y-3 text-sm text-slate-600"><p>Create your owner account from the server terminal. Public signup is disabled.</p><code className="block overflow-x-auto rounded-lg bg-slate-100 p-3 text-xs">docker compose exec backend python -m app.scripts.manage_owner</code><button className={secondary} type="button" onClick={() => void refreshSession()}>Check again</button></div>
-            : <form className="mt-5 space-y-4" onSubmit={(event) => void login(event)}>
-              <label className="block text-sm font-bold">Username<input className={field} autoComplete="username" required maxLength={100} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-              <label className="block text-sm font-bold">Password<input className={field} type="password" autoComplete="current-password" required maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="accent-emerald-600" />Remember me on this device</label>
-              <button className={`${button} w-full`} disabled={busy || !session.csrf_token} type="submit">{busy ? 'Signing in...' : 'Sign in'}</button>
-              <p className="text-xs leading-5 text-slate-500">Owner account recovery is available through the server terminal.</p>
-            </form>}
-        </section> : <>
+      <>
           <section className={panel}><h1 className="text-2xl font-black">Your leagues</h1><p className="mt-2 text-sm leading-6 text-slate-500">Saved connections follow your account across devices. ESPN credentials stay encrypted on the server.</p>
             {busy && <p role="status" className="mt-3 text-sm text-slate-500">Loading or validating your connection...</p>}
             <div className="mt-5 space-y-3">{connections.map((connection) => <article key={connection.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 p-4">
@@ -233,7 +237,7 @@ export default function AccountApp() {
             <button type="button" className={secondary} disabled={busy} onClick={() => void importLeague()}>Import server-configured league</button>
             <button type="button" className={secondary} disabled={busy} onClick={() => void logout(true)}>Sign out all devices</button>
           </div><p className="mt-3 text-xs leading-5 text-slate-500">Opening a league remembers it for your next visit. Team and tab changes are saved automatically. Each new visit opens at the league's current week.</p></section>
-        </>}
+        </>
     </main>
   </div>
 }

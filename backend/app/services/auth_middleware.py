@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.config.security import auth_enabled, cookie_name, public_origin, request_origin
 from app.services.account_store import accounts, AccountConfigurationError
 
-PUBLIC_PATHS = {"/api/auth/session", "/api/auth/login", "/api/health/", "/api/health/ready"}
+PUBLIC_PATHS = {"/api/auth/session", "/api/auth/login", "/api/health/", "/api/health/ready", "/api/public/performance"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 

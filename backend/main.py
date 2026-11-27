@@ -15,6 +15,7 @@ from app.services.accuracy_scheduler import AccuracyScheduler
 from app.config.security import public_origin, auth_enabled, tailscale_origin
 from app.services.auth_middleware import protect_request
 from app.routes.account import router as account_router
+from app.routes.public import router as public_router
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
@@ -95,3 +96,4 @@ app.include_router(players_router)
 app.include_router(espn_router)
 app.include_router(accuracy_router)
 app.include_router(account_router)
+app.include_router(public_router)

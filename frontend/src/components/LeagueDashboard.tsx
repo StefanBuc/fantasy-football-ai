@@ -37,6 +37,7 @@ type LeagueDashboardProps = {
   initialView?: DashboardView
   onPreferencesChange?: (teamId: number, view: DashboardView) => void
   onSignOut?: () => void
+  onHome?: () => void
 }
 
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
@@ -301,6 +302,7 @@ export function LeagueDashboard({
   initialView = 'team',
   onPreferencesChange,
   onSignOut,
+  onHome,
 }: LeagueDashboardProps) {
   const initialTeam = league.teams.find((team) => team.team_id === initialTeamId)?.team_id ?? league.teams[0]?.team_id ?? 0
   const [selectedTeamId, setSelectedTeamId] = useState(
@@ -435,6 +437,7 @@ export function LeagueDashboard({
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle isDark={isDark} onToggle={onToggleDark} />
+            {onHome && <button type="button" onClick={onHome} className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold">Home</button>}
             {onSignOut && <button type="button" onClick={onSignOut} className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold">Sign out</button>}
             <button
               type="button"
