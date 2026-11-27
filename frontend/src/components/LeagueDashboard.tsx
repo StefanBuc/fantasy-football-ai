@@ -23,9 +23,9 @@ import { PlayerScore, LiveScoreNote } from './PlayerScore'
 import { useLiveScores } from '../lib/useLiveScores'
 import { OptimizedLineupView } from './OptimizedLineupView'
 import { TradeAnalyzerView } from './TradeAnalyzerView'
+import type { DashboardView } from '../lib/account'
 
 export type ConnectionMode = 'public' | 'local'
-type DashboardView = 'team' | 'matchup' | 'players' | 'league' | 'accuracy' | 'optimized' | 'trade'
 
 type LeagueDashboardProps = {
   league: ESPNLeague
@@ -33,6 +33,10 @@ type LeagueDashboardProps = {
   onDisconnect: () => void
   isDark: boolean
   onToggleDark: () => void
+  initialTeamId?: number | null
+  initialView?: DashboardView
+  onPreferencesChange?: (teamId: number, view: DashboardView) => void
+  onSignOut?: () => void
 }
 
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
@@ -293,17 +297,22 @@ export function LeagueDashboard({
   onDisconnect,
   isDark,
   onToggleDark,
+  initialTeamId,
+  initialView = 'team',
+  onPreferencesChange,
+  onSignOut,
 }: LeagueDashboardProps) {
+  const initialTeam = league.teams.find((team) => team.team_id === initialTeamId)?.team_id ?? league.teams[0]?.team_id ?? 0
   const [selectedTeamId, setSelectedTeamId] = useState(
-    league.teams[0]?.team_id ?? 0,
+    initialTeam,
   )
   const [week, setWeek] = useState(league.current_week)
   const [projection, setProjection] = useState<TeamProjectionResponse | null>(() =>
     viewCache.read(viewKey('team', connectionMode, league.league_id, league.season,
-      league.current_week, league.teams[0]?.team_id ?? 0)))
+      league.current_week, initialTeam)))
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<DashboardView>('team')
+  const [activeView, setActiveView] = useState<DashboardView>(initialView)
   const requestVersion = useRef(0)
   const [isRefreshingData, setIsRefreshingData] = useState(false)
 
@@ -400,6 +409,7 @@ export function LeagueDashboard({
 
   function changeTeam(teamId: number) {
     setSelectedTeamId(teamId)
+    onPreferencesChange?.(teamId, activeView)
     setProjection(null)
     setError(null)
   }
@@ -425,6 +435,7 @@ export function LeagueDashboard({
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle isDark={isDark} onToggle={onToggleDark} />
+            {onSignOut && <button type="button" onClick={onSignOut} className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold">Sign out</button>}
             <button
               type="button"
               onClick={onDisconnect}
@@ -447,7 +458,7 @@ export function LeagueDashboard({
             <button
               key={view}
               type="button"
-              onClick={() => setActiveView(view)}
+              onClick={() => { setActiveView(view); onPreferencesChange?.(selectedTeamId, view) }}
               className={`shrink-0 whitespace-nowrap border-b-2 pb-3 text-sm font-black transition ${
                 activeView === view
                   ? 'border-lime-300 text-white'

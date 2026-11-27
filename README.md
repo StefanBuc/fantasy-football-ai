@@ -13,6 +13,7 @@ The application currently supports projections for quarterbacks, running backs, 
 - Compares model performance against last-game and rolling-mean baselines.
 - Generates batched weekly projections through a FastAPI API.
 - Connects public ESPN leagues and locally configured private ESPN leagues.
+- Protects the public deployment with a single owner account, secure server-side sessions, and encrypted saved private-league connections.
 - Maps ESPN players to NFL/GSIS identifiers and projects complete fantasy rosters.
 - Displays My Team, Optimized lineup, Trade analyzer, Matchup, Players, League, and Accuracy views in a React frontend.
 - Recommends the highest projected eligible lineup, with optional free-agent additions and explicit start/bench changes.
@@ -155,15 +156,34 @@ From the repository root:
 docker compose up -d
 ```
 
-Open **http://localhost:8090** once the services are healthy (`docker compose ps`). API documentation is at **http://localhost:8091/docs**. Host ports default to 8090 and 8091; container-internal ports remain 8080 and 8000, which do not conflict with other containers' ports. Compose builds missing images automatically; the first build downloads Python, Node, and PyTorch's CUDA libraries. Models and data still load on their first uncached request; Docker does not make that download instant.
+Host ports default to 8090 for the frontend and loopback-only 8091 for the API; container-internal ports remain 8080 and 8000. Owner login works at **https://ffa.stefanb.me**, **http://100.94.147.92:8090** through Tailscale, and **http://localhost:8090** on the Docker host. `http://127.0.0.1:8090` and IPv6 loopback work too. Native Vite development works at **http://localhost:5173**, including its loopback aliases and alternate local ports. Other HTTP addresses point you to a configured address. To change the public/Tailscale entry points, set `FANTASY_PUBLIC_URL` or `FANTASY_TAILSCALE_URL` in a `.env` file beside `compose.yaml`. Set `FANTASY_TAILSCALE_URL=` to disable the Tailscale HTTP exception. Compose builds missing images automatically; the first build downloads Python, Node, and PyTorch's CUDA libraries. Models and data still load on their first uncached request.
 
-The model directory `backend/models/pytorch/` must exist and contain the selected checkpoints. It is mounted read-only rather than copied into an image. Credentials are read at runtime from `backend/.env`, when present; `.env` files, model files, and caches are excluded from image builds. For the private-league button, configure that file as described below, including `ESPN_ENABLE_LOCAL_API=true`. The frontend build explicitly enables the local-league option.
+The model directory `backend/models/pytorch/` must exist and contain the selected checkpoints. It is mounted read-only rather than copied into an image. Optional configuration is read from `backend/.env`; `.env` files, model files, databases, and caches are excluded from image builds. Add private leagues in the authenticated UI. An existing environment-configured league can be imported there without retyping its credentials.
 
-Both services publish only on your computer's loopback address. The frontend shares the backend's network namespace so its API proxy connects through `127.0.0.1`; this preserves the existing private-league loopback check without trusting browser-supplied forwarded headers. This configuration is for local use. A public deployment needs authentication before enabling private-league routes.
+The frontend shares the backend's network namespace and proxies API calls through `127.0.0.1`. **Loopback is not authentication:** every data route, including `/api/espn/local/*`, now requires an owner session in the default configuration. Only minimal health checks and session/login entry points are anonymous. The API port remains bound to loopback. Restrict access to frontend port 8090 to your tunnel/reverse proxy using the server firewall where appropriate; an externally reachable HTTP port is not a substitute for HTTPS.
+
+On your server, after updating the source:
+
+```bash
+docker compose up -d --build
+docker compose exec backend python -m app.scripts.manage_owner
+```
+
+The second command interactively asks for an owner username and a password of at least 8 characters; the password is hidden and never passed on the command line. There is no public signup or first-visitor account claim. Open **https://ffa.stefanb.me**, sign in, and add a public/private league or choose **Import server-configured league**. Setup is required once per account database. Reset a forgotten login or revoke all sessions from the trusted server terminal with:
+
+```bash
+docker compose exec backend python -m app.scripts.manage_owner --reset
+```
+
+Resetting the login preserves saved leagues, preferences, and prediction history. The normal `/api/health/` probe is available before setup so containers can start; `/api/health/ready` returns 503 until the owner and public origin are configured.
+
+Cloudflare must **bypass caching for `/api/*` and the HTML entry page**, including any Cache Everything or Edge TTL overrides. The app sends `Cache-Control: no-store, private` for API responses and `no-cache` for HTML; hashed `/assets/*` files can be cached. Do not add a rule that strips `Set-Cookie` or caches authenticated responses. HTTPS terminates at Cloudflare; the app checks the configured browser Origin and session-bound CSRF token instead of trusting forwarded IP headers. Nginx includes a Content Security Policy, anti-framing policy, and HTTPS/security headers. Existing Cloudflare Access, if used, can remain an additional outer gate.
 
 Docker cache data lives in the `projection-cache` named volume, separate from `backend/cache/`, and survives container rebuilds and `docker compose down`. Avoid `down --volumes` unless you want to delete that cache. The cache fingerprints use a consistent file order on Windows and Linux.
 
 Prediction history uses a separate `prediction-history` volume at `/app/data/predictions.sqlite3`. It survives cache expiry, refreshes, rebuilds, and normal `docker compose down`. `down --volumes` deletes this history as well as the cache; back up the history before removing volumes.
+
+Owner credentials, session hashes, saved connections, and preferences live in `/app/data/accounts.sqlite3` in the same persistent data volume, separate from prediction history. ESPN cookies are encrypted using a Fernet key in the separate `account-secrets` volume at `/app/secrets/credentials.key`. **Back up the account database and encryption key separately and protect both.** Losing the key makes existing saved ESPN cookies unreadable. Restore the key, or remove/re-add all affected private connections; the app never silently replaces a missing key while encrypted credentials remain. Never use `down --volumes` to update this deployment.
 
 Useful commands:
 
@@ -189,6 +209,24 @@ docker compose exec backend python -c "import torch; assert torch.cuda.is_availa
 
 This Compose setup requires an NVIDIA GPU; local Python development can still use CPU when CUDA is unavailable. GPU acceleration applies to model inference; ESPN downloads, Parquet restoration, and pandas feature preparation still run on CPU.
 
+## Owner sessions and saved preferences
+
+Docker enforces owner authentication. Passwords are hashed with Argon2id. Session cookies contain random opaque identifiers; only their SHA-256 hashes are stored server-side. The public HTTPS site's cookies use `Secure`, `HttpOnly`, `SameSite=Strict`, and the `__Host-` prefix. State-changing requests require the exact origin for the selected entry point plus a session-bound CSRF token, including login. CORS allows only configured origins. Sign-in is limited to 20 attempts per 15 minutes across workers using the account database.
+
+The explicitly configured Tailscale HTTP address uses a separate host-only `HttpOnly`, `SameSite=Strict` session cookie without `Secure`, because browsers do not send Secure cookies over HTTP. Tailscale supplies transport encryption between tailnet devices; the app still requires owner login and does not treat a Host header or an IP address as authentication. Only a configured IPv4 origin in `100.64.0.0/10` can use this exception; general public HTTP and arbitrary LAN addresses cannot. Nginx preserves the incoming Host and port so the API can select the correct entry point. Keep Tailscale access restricted to your devices/users. If you later use Tailscale HTTPS/MagicDNS, prefer HTTPS there as well.
+
+Sessions are bound to their issuing origin, and public/Tailscale cookies cannot be replayed between entry points. Sign in separately on each address using the **same owner account**; saved leagues, team/tab preferences, and theme are shared. Signing out on one address leaves the other signed in; **Sign out all devices** revokes both. Existing pre-origin-binding sessions require one new sign-in after upgrading; the database migration preserves the owner, saved connections, encryption key, and prediction history.
+
+HTTP loopback access is supported automatically for exact `localhost`, `127.0.0.1`, and `[::1]` hosts. It uses a separate host-only `HttpOnly`, `SameSite=Strict` cookie per port, with server-side origin binding and the same login/CSRF requirements. An app on another local port cannot read authenticated responses using a different Origin. This does not allow arbitrary LAN hosts or hostnames containing the word localhost. Public HTTPS cookies remain Secure. Vite and Nginx preserve the browser's Host/port through the same-origin API proxy.
+
+Without **Remember me**, the cookie lasts for the browser session, with a maximum server lifetime of 12 hours and two hours of inactivity. Remembered sessions last up to 30 days with a seven-day inactivity limit. Login rotates the session identifier. Sign out revokes this session; **Sign out all devices** and a terminal password reset revoke all sessions. Expired sessions return the frontend to login, and logout clears cached league views and in-memory credentials. No authentication tokens or ESPN credentials are stored in browser local/session storage.
+
+The owner can save up to 10 league/season connections. Private credentials are validated with ESPN before saving, never returned by connection APIs, and can be renewed through **Update**. The **Your leagues** screen supports selecting and removing connections. Removal deletes saved cookies and stops enrollment for that league's automatic captures while retaining existing accuracy history. Saved private leagues participate in the existing scheduler without an open browser. Credentials that expire need to be renewed; the app does not automatically log into ESPN using an ESPN password.
+
+Opening a league remembers it as the next automatic connection. Preferred team, dashboard tab, and theme are stored on the server and restored on other signed-in devices. A new visit starts at the league's current week rather than retaining a stale past-week filter. Historical predictions and existing cache/history formats are preserved. This is intentionally a **single-owner app**, not a multi-user registration/permissions system.
+
+For native localhost development, run `python -m app.scripts.manage_owner` once from `backend/`, start the API on port 8000, and run `npm run dev` from `frontend/`. Use Vite's normal same-origin `/api` proxy. No insecure-development flag or public-domain redirect is needed for loopback login. `FANTASY_PUBLIC_URL` defaults to `https://ffa.stefanb.me` if unset. The legacy `FANTASY_INSECURE_LOCAL_DEV=true` option is accepted only with a loopback public URL; it is unnecessary for ordinary localhost access. `FANTASY_AUTH_ENABLED=false` remains an explicit native-development/testing escape hatch; never expose it publicly, and Docker forces authentication on with insecure development off.
+
 ## ESPN configuration
 
 The project uses the community-maintained `espn-api` package. Public leagues can be connected using their league ID and season. Private leagues require ESPN session-cookie credentials.
@@ -203,7 +241,7 @@ ESPN_S2=your_espn_s2_cookie
 ESPN_ENABLE_LOCAL_API=true
 ```
 
-The credential-backed `/api/espn/local/*` endpoints are hidden from the generated API schema and restricted to loopback clients. Never commit `.env`, `ESPN_SWID`, or `ESPN_S2`; these cookies should be treated like passwords.
+With authentication enabled, private API calls select an authenticated saved connection using `X-League-Connection`; protected logo images can use its non-secret ID in a query parameter while still requiring the session cookie. Environment credentials are available only through the authenticated import action. In explicit authentication-disabled native development, the legacy private routes still require `ESPN_ENABLE_LOCAL_API=true` and a loopback client. Never commit `.env`, `ESPN_SWID`, or `ESPN_S2`; these cookies should be treated like passwords.
 
 ## API overview
 
@@ -255,7 +293,7 @@ This uses the existing projection models, with currently available player histor
 
 Roster selection is lightweight. Analysis builds each league/week once through the existing model projection cache, so the first multi-week analysis can take longer and subsequent proposals reuse those forecasts. Hypothetical rosters never change ESPN or write hypothetical values to prediction history. ESPN ownership is rechecked on submission. Trade processing delays, league vetoes, keeper/dynasty value, waiver pickups, and playoff simulations are outside this analysis.
 
-`POST /api/espn/trade-analysis` accepts `league_id`, `season`, `team_a_id`, `team_b_id`, `team_a_player_ids`, `team_b_player_ids`, `week`, and `end_week`. Each side sends 1–10 unique ESPN IDs, including negative D/ST IDs where applicable. The local endpoint uses the configured league and accepts the trade fields without connection fields. Both local trade routes retain the existing loopback/private-league access checks.
+`POST /api/espn/trade-analysis` accepts `league_id`, `season`, `team_a_id`, `team_b_id`, `team_a_player_ids`, `team_b_player_ids`, `week`, and `end_week`. Each side sends 1–10 unique ESPN IDs, including negative D/ST IDs where applicable. The private equivalent uses the authenticated saved connection and accepts the trade fields without connection fields. Both routes require owner authentication in production.
 
 ## Training models
 
@@ -363,7 +401,7 @@ Results sync automatically as described below, or click **Sync results** to fetc
 
 ### Automatic capture and sync
 
-Automatic tracking is enabled by default with the normal API startup, including Docker. Keep the backend running: a sleeping or stopped laptop cannot capture predictions, and past games are never backfilled with hindsight. Connect a public league once to register it for future automatic captures; only its ID, season, and connection mode are saved. An enabled, valid local ESPN configuration is enrolled automatically. Private credentials are read from the existing environment at runtime, never stored in job records. Old or disabled private configurations cannot be used for new captures. Registration and status survive restarts in the history database.
+Automatic tracking is enabled by default with the normal API startup, including Docker. Keep the backend running: a sleeping or stopped laptop cannot capture predictions, and past games are never backfilled with hindsight. Saving a private league, or connecting a public league, registers it for future automatic captures. Job records contain only the league ID, season, and connection mode; saved private credentials are decrypted from the separate account store at execution time. Removing a saved connection stops its enrollment, and connections marked as requiring new cookies are skipped until updated. In authentication-disabled native development only, an enabled local environment configuration can still be enrolled automatically. On upgrade, import the old server-configured private league once through the owner UI to resume its league captures. Registration and status survive restarts in the history database.
 
 A background worker checks once per minute, with network work starting after API startup. During the six hours before a regular-season kickoff, it captures every 15 minutes. Weekly NFL captures cover QB/RB/WR/TE/K/DST for the approaching games, using the latest available roster if that week's roster is not published. League captures use the same roster/free-agent matching, QB starter signals, and live injury adjustments as the Players page. Existing kickoff locks still apply at write time. The current NFL season includes the previous calendar year during January and February. Models and prepared NFL data are shared with normal requests. When a capture needs a season service that has been loaded for over six hours, the scheduler refreshes it through the existing registry, which keeps its previous service usable during a refresh.
 

@@ -7,6 +7,22 @@ cache/
 backend/data/
 models/
 
+# Account/history databases, SQLite sidecars, and local backups
+/data/
+*.sqlite*
+*.db
+*.db-*
+*.db.*
+*.automation.lock
+backups/
+
+# Encryption keys and runtime secret directories (including custom locations)
+secrets/
+account-secrets/
+*.key
+*.key.*
+*.pem
+
 # C extensions
 *.so
 
@@ -161,6 +177,9 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.*.example
 .envrc
 .venv
 env/

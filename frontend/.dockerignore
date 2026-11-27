@@ -8,3 +8,16 @@ tests/
 .git/
 **/.env
 **/.env.*
+**/secrets/
+**/account-secrets/
+**/*.key
+**/*.key.*
+**/*.pem
+**/*.sqlite*
+**/*.db
+**/*.db-*
+**/*.db.*
+playwright-report/
+playwright/.cache/
+test-results/
+blob-report/

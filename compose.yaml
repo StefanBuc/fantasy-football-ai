@@ -13,6 +13,12 @@ services:
       - path: ./backend/.env
         required: false
     environment:
+      FANTASY_AUTH_ENABLED: "true"
+      FANTASY_INSECURE_LOCAL_DEV: "false"
+      FANTASY_PUBLIC_URL: ${FANTASY_PUBLIC_URL:-https://ffa.stefanb.me}
+      FANTASY_TAILSCALE_URL: ${FANTASY_TAILSCALE_URL-http://100.94.147.92:8090}
+      FANTASY_ACCOUNT_PATH: /app/data/accounts.sqlite3
+      FANTASY_ENCRYPTION_KEY_PATH: /app/secrets/credentials.key
       FANTASY_CACHE_PATH: /app/cache/runtime.sqlite3
       FANTASY_HISTORY_PATH: /app/data/predictions.sqlite3
     deploy:
@@ -25,6 +31,7 @@ services:
     volumes:
       - projection-cache:/app/cache
       - prediction-history:/app/data
+      - account-secrets:/app/secrets
       - type: bind
         source: ./backend/models/pytorch
         target: /app/models/pytorch
@@ -61,3 +68,4 @@ services:
 volumes:
   projection-cache:
   prediction-history:
+  account-secrets:

@@ -61,9 +61,23 @@ function getErrorMessage(payload: unknown): string | null {
 }
 
 const pendingRequests = new Map<string, Promise<unknown>>()
+let csrfToken = ''
+let signedIn = false
+let connectionId: string | null = null
+let authEpoch = 0
+
+export function configureSession(csrf: string, authenticated: boolean) {
+  if (signedIn !== authenticated) authEpoch += 1
+  csrfToken = csrf
+  signedIn = authenticated
+}
+
+export function setActiveConnection(id: string | null) {
+  connectionId = id
+}
 
 function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
-  const key = JSON.stringify([API_BASE_URL, path, body])
+  const key = JSON.stringify([API_BASE_URL, path, connectionId, authEpoch, body])
   const existing = pendingRequests.get(key)
   if (existing) return existing as Promise<TResponse>
   const pending: Promise<TResponse> = sendJson<TResponse>(path, body).finally(() => {
@@ -73,20 +87,25 @@ function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
   return pending
 }
 
-async function sendJson<TResponse>(
+export async function sendJson<TResponse>(
   path: string,
   body: unknown,
-  method: 'POST' | 'GET' = 'POST',
+  method: 'POST' | 'GET' | 'PUT' | 'PATCH' | 'DELETE' = 'POST',
 ): Promise<TResponse> {
   let response: Response
+  const epoch = authEpoch
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
+      credentials: 'include',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
+        ...(csrfToken && method !== 'GET' ? { 'X-CSRF-Token': csrfToken } : {}),
+        ...(connectionId && path.startsWith('/api/espn/local/') ? { 'X-League-Connection': connectionId } : {}),
       },
-      body: method === 'POST' ? JSON.stringify(body) : undefined,
+      body: method !== 'GET' ? JSON.stringify(body) : undefined,
     })
   } catch {
     throw new Error(
@@ -95,6 +114,11 @@ async function sendJson<TResponse>(
   }
 
   const payload: unknown = await response.json().catch(() => null)
+
+  if (epoch !== authEpoch) throw new Error('The signed-in session changed. Reload this view.')
+  if (response.status === 401 && signedIn && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('fantasy-session-expired'))
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -188,7 +212,8 @@ export function getTeamLogoUrl(
       connectionMode === 'local'
       && hostname === 'mystique-api.fantasy.espn.com'
     ) {
-      return `${API_BASE_URL}/api/espn/local/team-logo/${teamId}`
+      const query = connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ''
+      return `${API_BASE_URL}/api/espn/local/team-logo/${teamId}${query}`
     }
   } catch {
     return null

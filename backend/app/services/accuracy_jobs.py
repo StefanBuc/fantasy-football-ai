@@ -139,6 +139,12 @@ class AccuracyJobs:
             note = "Reconnect this league once to enable automatic captures."
         elif season != nfl_season(utc_now()):
             note = "Automatic captures follow the active NFL season. Older history can still be synced manually."
+        elif target is not None and target["mode"] == "saved":
+            from app.services.account_store import accounts
+            connection = next((row for row in accounts.connections() if scope == f"espn:{row['league_id']}" and row["season"] == season and row["mode"] == "private"), None)
+            if connection is None or connection["status"] != "connected":
+                capture_enabled = False
+                note = "Update the saved private-league connection to restore captures."
         elif target is not None and target["mode"] == "local":
             try:
                 config = get_local_espn_config() if local_espn_api_enabled() else None

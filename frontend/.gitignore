@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Generated type-check and browser-test output
+*.tsbuildinfo
+playwright-report/
+playwright/.cache/
+test-results/
+blob-report/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

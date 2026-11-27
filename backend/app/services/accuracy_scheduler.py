@@ -8,6 +8,8 @@ from filelock import Timeout
 import nfl_data_py as nfl
 
 from app.config.espn_config import get_local_espn_config, local_espn_api_enabled
+from app.config.security import auth_enabled
+from app.services.account_store import accounts
 from app.services.accuracy_jobs import (
     accuracy_jobs, automation_enabled, operation_lock, run_tracked_sync,
     CAPTURE_WINDOW, POLL_SECONDS,
@@ -38,7 +40,7 @@ def capture_windows(schedule, season, now):
 
 
 def current_local_config():
-    if not local_espn_api_enabled():
+    if auth_enabled() or not local_espn_api_enabled():
         return None
     try:
         return get_local_espn_config()
@@ -92,7 +94,11 @@ def capture_league(service, target, week, schedule, config):
     from app.routes.espn import project_league_players
 
     league_id = int(target["scope"].split(":", 1)[1])
-    credentials = {"espn_s2": config.espn_s2, "swid": config.swid} if target["mode"] == "local" else {}
+    if target["mode"] == "saved":
+        config = accounts.config_for_league(league_id, target["season"])
+        if config is None:
+            raise RuntimeError("Saved private-league connection is unavailable.")
+    credentials = {"espn_s2": config.espn_s2, "swid": config.swid} if target["mode"] in {"local", "saved"} else {}
     league = get_league(league_id=league_id, year=target["season"], **credentials)
     _, saved = project_league_players(
         league, league_id, target["season"], week, service=service,
@@ -174,8 +180,11 @@ class AccuracyScheduler:
         if config is not None:
             accuracy_jobs.register(config.league_id, config.season, "local")
         targets = [{"scope": "weekly", "season": season, "mode": "weekly"}]
+        saved_scopes = {(f"espn:{row['league_id']}", row["season"]) for row in accounts.connections()
+                        if row["mode"] == "private" and row["status"] == "connected"} if auth_enabled() else set()
         targets.extend(target for target in accuracy_jobs.targets() if target["season"] == season and (
-            target["mode"] == "public" or config is not None and target["scope"] == f"espn:{config.league_id}"
+            target["mode"] == "public" or target["mode"] == "saved" and (target["scope"], target["season"]) in saved_scopes
+            or config is not None and target["scope"] == f"espn:{config.league_id}"
             and target["season"] == config.season))
 
         windows = {}

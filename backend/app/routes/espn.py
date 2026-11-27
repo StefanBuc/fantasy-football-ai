@@ -56,6 +56,8 @@ from app.services.matchup_probability import estimate_win_chance
 from app.services.lineup_optimizer import optimize_lineup
 from app.schemas.trade import LocalTradeRequest, TradeRequest, TradeRosters, TradeAnalysis
 from app.services.trade_analyzer import analyze_trade
+from app.config.security import auth_enabled
+from app.services.account_store import accounts
 from app.services.result_cache import ResultCache
 from espn_api.football.constant import POSITION_MAP
 from app.services.espn_connection_cache import espn_connection_cache
@@ -470,6 +472,14 @@ def find_league_team(league, team_id: int):
 def require_local_espn_access(
     request: Request,
 ) -> ESPNLocalConfig:
+    if auth_enabled():
+        if not getattr(request.state, "owner_authenticated", False):
+            raise HTTPException(401, "Sign in to access a private league.")
+        id = request.headers.get("X-League-Connection") or request.query_params.get("connection_id")
+        try:
+            return accounts.private_config(id)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
     client_host = (
         request.client.host
         if request.client is not None
@@ -507,11 +517,12 @@ def get_configured_private_league(
             swid=config.swid,
         )
     except ESPNAccessDenied as error:
+        if auth_enabled():
+            accounts.mark_expired(request.headers.get("X-League-Connection") or request.query_params.get("connection_id"))
         raise HTTPException(
             status_code=403,
             detail=(
-                "The configured ESPN credentials were "
-                "not accepted."
+                "The private ESPN credentials were not accepted. Update the saved connection's cookies."
             ),
         ) from error
     except ESPNInvalidLeague as error:
@@ -525,7 +536,7 @@ def get_configured_private_league(
             detail="ESPN returned an unexpected response.",
         ) from error
 
-    register_league_tracking(config.league_id, config.season, "local")
+    register_league_tracking(config.league_id, config.season, "saved" if auth_enabled() else "local")
     return config, league
 
 

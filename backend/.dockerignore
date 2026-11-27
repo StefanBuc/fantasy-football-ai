@@ -8,3 +8,13 @@ app/**/__pycache__/
 app/**/*.pyc
 **/.env
 **/.env.*
+**/secrets/
+**/account-secrets/
+**/*.key
+**/*.key.*
+**/*.pem
+**/*.sqlite*
+**/*.db
+**/*.db-*
+**/*.db.*
+**/*.automation.lock
