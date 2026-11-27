@@ -97,6 +97,17 @@ def test_espn_projection_survives_restart():
     builder.assert_not_called()
 
 
+def test_player_pool_and_team_cache_namespaces_do_not_collide():
+    key = (123, 2026, 10, "fingerprint")
+    team = ESPNLeagueWeekProjection(datetime.now(timezone.utc), 10, {1: ()})
+    pool = ESPNLeagueWeekProjection(datetime.now(timezone.utc), 10, {0: ()})
+    ESPNProjectionCache(persistent=True).get_or_create(key, lambda: team)
+    player_cache = ESPNProjectionCache(persistent=True, namespace="espn_player_pool_v1")
+    assert player_cache.get_or_create(key, lambda: pool) == (pool, False)
+    player_cache.clear()
+    assert ESPNProjectionCache(persistent=True).get_or_create(key, lambda: None) == (team, True)
+
+
 def test_cached_league_is_not_blocked_by_another_generation_building():
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event

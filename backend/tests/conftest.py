@@ -14,3 +14,6 @@ def isolated_disk_cache(tmp_path, monkeypatch):
     from app.services.prediction_history import prediction_history
 
     monkeypatch.setattr(prediction_history, "path", tmp_path / "predictions.sqlite3")
+    from app.routes.espn import player_pool_cache
+
+    player_pool_cache.clear()

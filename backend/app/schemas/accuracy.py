@@ -149,6 +149,9 @@ class AutomationStatus(BaseModel):
     worker_error: str | None
     capture: AutomationJob | None
     sync: AutomationJob | None
+    precompute: AutomationJob | None
+    precompute_enabled: bool
+    precompute_interval_minutes: int
     poll_seconds: int
     capture_interval_minutes: int
     capture_window_hours: int

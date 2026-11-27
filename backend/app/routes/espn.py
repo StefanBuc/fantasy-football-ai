@@ -1,4 +1,5 @@
 from typing import Any, Literal
+from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 from hashlib import sha256
@@ -64,6 +65,7 @@ from espn_api.football.constant import POSITION_MAP
 from app.services.espn_connection_cache import espn_connection_cache
 from app.services.espn_projection_cache import (
     ESPNProjectionCache,
+    ESPNLeagueWeekProjection,
     build_league_week_projection,
     make_roster_player,
     roster_fingerprint,
@@ -88,6 +90,7 @@ ESPN_TEAM_ALIASES = {
 }
 
 projection_cache = ESPNProjectionCache(persistent=True)
+player_pool_cache = ESPNProjectionCache(persistent=True, namespace="espn_player_pool_v1")
 optimizer_settings_cache = ResultCache(ttl_seconds=900, max_entries=16, name="optimizer_settings")
 
 PLAYER_POOL_POSITIONS = {
@@ -276,43 +279,38 @@ def project_league_players(
 
     if service is None:
         service = get_espn_projection_service(season)
-    roster_df, roster_week = (
-        service.data.get_projection_roster(
-            season=season,
-            week=week,
-        )
-    )
-    opponents = service.data.get_week_opponents(
-        season=season,
-        week=week,
-    )
-    id_map = service.data.get_player_id_map()
-
     roster_players = [
         make_roster_player(
             player=player_sources_by_id[espn_id],
             normalize_team=normalize_espn_team,
             week=week,
         )
-        for espn_id in players_by_id
+        for espn_id in sorted(players_by_id)
     ]
-    pool_projections = project_espn_roster(
-        weekly_service=service,
-        roster_players=roster_players,
-        id_map=id_map,
-        roster_df=roster_df,
-        opponents=opponents,
-        season=season,
-        week=week,
-        depth_chart_df=service.data.get_week_depth_chart(
-            season=season,
-            week=week,
-        ),
-        use_espn_qb_starter_signal=True,
+    # Cache only model output. Ownership, ESPN observations, availability and
+    # frozen pregame scores are still assembled from the current request.
+    fingerprint = sha256(json.dumps([asdict(player) for player in roster_players],
+                                    sort_keys=True).encode()).hexdigest()
+
+    def build_pool():
+        roster_df, roster_week = service.data.get_projection_roster(season=season, week=week)
+        projections = project_espn_roster(
+            weekly_service=service, roster_players=roster_players,
+            id_map=service.data.get_player_id_map(), roster_df=roster_df,
+            opponents=service.data.get_week_opponents(season=season, week=week),
+            season=season, week=week,
+            depth_chart_df=service.data.get_week_depth_chart(season=season, week=week),
+            use_espn_qb_starter_signal=True,
+        )
+        return ESPNLeagueWeekProjection(datetime.now(timezone.utc), roster_week, {0: tuple(projections)})
+
+    pool, _ = player_pool_cache.get_or_create(
+        (league_id, season, week, f"{fingerprint}:{getattr(service, 'generation', '')}"),
+        build_pool,
     )
     projections_by_id = {
         projection.espn_id: projection
-        for projection in pool_projections
+        for projection in pool.team_projections[0]
     }
 
     for espn_id, player in tuple(players_by_id.items()):
@@ -378,7 +376,7 @@ def project_league_players(
 
     saved = record_predictions(
         service, season=season, week=week, scope=f"espn:{league_id}",
-        generated_at=datetime.now(timezone.utc),
+        generated_at=pool.generated_at,
         strict=strict_history, schedule=history_schedule,
         samples=[{
             "player_id": projections_by_id[player.espn_id].player_id,
@@ -399,7 +397,7 @@ def project_league_players(
         league_id=league_id,
         season=season,
         week=week,
-        roster_week=roster_week,
+        roster_week=pool.roster_week,
         player_count=len(players),
         available_count=available_count,
         rostered_count=len(players) - available_count,
@@ -835,6 +833,14 @@ def build_matchup_response(
     )
 
 
+def cached_league_projection(league, league_id, season, week, service):
+    key = (league_id, season, week,
+           f"{roster_fingerprint(league, week)}:{getattr(service, 'generation', '')}")
+    return projection_cache.get_or_create(key=key, builder=lambda: build_league_week_projection(
+        league=league, service=service, season=season, week=week,
+        normalize_team=normalize_espn_team))
+
+
 def build_team_projection_response(
     league,
     league_id: int,
@@ -851,24 +857,7 @@ def build_team_projection_response(
     try:
         if service is None:
             service = get_espn_projection_service(season=season)
-        cache_key = (
-            league_id,
-            season,
-            week,
-            f"{roster_fingerprint(league, week)}:{getattr(service, 'generation', '')}",
-        )
-        cached_projection, cache_hit = (
-            projection_cache.get_or_create(
-                key=cache_key,
-                builder=lambda: build_league_week_projection(
-                    league=league,
-                    service=service,
-                    season=season,
-                    week=week,
-                    normalize_team=normalize_espn_team,
-                ),
-            )
-        )
+        cached_projection, cache_hit = cached_league_projection(league, league_id, season, week, service)
         projections = cached_projection.team_projections.get(
             team_id,
             (),
@@ -1019,9 +1008,7 @@ def build_trade_rosters(league):
 
 
 def trade_week_profiles(league, league_id, season, week, service):
-    key = (league_id, season, week, f"{roster_fingerprint(league, week)}:{getattr(service, 'generation', '')}")
-    projection, _ = projection_cache.get_or_create(key, lambda: build_league_week_projection(
-        league=league, service=service, season=season, week=week, normalize_team=normalize_espn_team))
+    projection, _ = cached_league_projection(league, league_id, season, week, service)
     profiles = {}
     for team in league.teams:
         raw = {int(player.playerId): player for player in team.roster}

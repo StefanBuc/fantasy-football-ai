@@ -274,6 +274,9 @@ export type AutomationStatus = {
   worker_error: string | null
   capture: AutomationJob | null
   sync: AutomationJob | null
+  precompute: AutomationJob | null
+  precompute_enabled: boolean
+  precompute_interval_minutes: number
   poll_seconds: number
   capture_interval_minutes: number
   capture_window_hours: number

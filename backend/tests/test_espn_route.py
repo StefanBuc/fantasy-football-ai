@@ -789,3 +789,83 @@ def test_league_players_include_rostered_and_available(
     assert players[502]["projection_reason"] == (
         "BUF is on bye in week 3."
     )
+
+
+def test_background_warmup_populates_caches_used_by_pages(monkeypatch):
+    from app.services.accuracy_scheduler import precompute_league
+
+    league = make_private_league()
+    league.current_week = 1
+    league.free_agents = Mock(return_value=[])
+    service = FakeESPNProjectionService()
+    service.generation = "warmup"
+    service.project_requests = Mock(wraps=service.project_requests)
+    monkeypatch.setattr("app.services.accuracy_scheduler.load_target_league", lambda *_: (123, league))
+    espn_route.projection_cache.clear()
+    result = precompute_league(service, {"scope": "espn:123", "season": 2024}, 2, None, None)
+    assert result["week"] == 1  # Follow the same default week as the app.
+    assert result["team_count"] == result["player_count"] == 1
+    calls = service.project_requests.call_count
+    assert calls > 0
+    response = espn_route.build_team_projection_response(league, 123, 2024, 1, 1, service)
+    assert response.cache_hit
+    espn_route.project_league_players(league, 123, 2024, 1, service)
+    assert service.project_requests.call_count == calls
+
+
+def test_player_pool_cache_preserves_generation_but_refreshes_ownership_and_espn_observations(monkeypatch):
+    league = make_private_league()
+    league.free_agents = lambda **_: []
+    service = FakeESPNProjectionService()
+    archive = Mock(return_value=0)
+    monkeypatch.setattr(espn_route, "record_predictions", archive)
+    service.project_requests = Mock(wraps=service.project_requests)
+    first, _ = espn_route.project_league_players(league, 123, 2024, 1, service)
+    generated = archive.call_args.kwargs["generated_at"]
+    league.teams[0].team_name = "Renamed team"
+    league.teams[0].roster[0].stats = {1: {"projected_breakdown": {"rushingYards": 90}}}
+    second, _ = espn_route.project_league_players(league, 123, 2024, 1, service)
+    assert service.project_requests.call_count == 1
+    assert first.players[0].predicted_points == second.players[0].predicted_points
+    assert second.players[0].fantasy_team_name == "Renamed team"
+    assert archive.call_args.kwargs["generated_at"] == generated
+    assert archive.call_args.kwargs["samples"][0]["espn_predicted_points"] == 9
+
+
+@pytest.mark.parametrize("change", ["injury", "generation", "week", "free_agent", "espn_signal"])
+def test_player_pool_cache_invalidates_on_model_inputs(change):
+    league = make_private_league()
+    free_agents = []
+    league.free_agents = lambda **_: free_agents
+    service = FakeESPNProjectionService()
+    service.project_requests = Mock(wraps=service.project_requests)
+    espn_route.project_league_players(league, 123, 2024, 1, service)
+    week = 1
+    if change == "injury":
+        league.teams[0].roster[0].injuryStatus = "QUESTIONABLE"
+    elif change == "generation":
+        service.generation = "new-data-or-model"
+    elif change == "week":
+        week = 2
+    elif change == "free_agent":
+        free_agents.append(SimpleNamespace(playerId=502, name="Available Receiver", position="WR",
+                                          lineupSlot="FA", proTeam="BUF"))
+    else:
+        league.teams[0].roster[0].projected_points = 25
+    espn_route.project_league_players(league, 123, 2024, week, service)
+    assert service.project_requests.call_count == 2
+
+
+def test_player_pool_cache_survives_restart_without_nfl_decoding(monkeypatch):
+    from app.services.espn_projection_cache import ESPNProjectionCache
+
+    league = make_private_league()
+    league.free_agents = lambda **_: []
+    service = FakeESPNProjectionService()
+    first, _ = espn_route.project_league_players(league, 123, 2024, 1, service)
+    replacement = ESPNProjectionCache(persistent=True, namespace="espn_player_pool_v1")
+    monkeypatch.setattr(espn_route, "player_pool_cache", replacement)
+    service.project_requests = Mock(side_effect=AssertionError("Unexpected inference"))
+    service.data.get_projection_roster = Mock(side_effect=AssertionError("Unexpected NFL decoding"))
+    second, _ = espn_route.project_league_players(league, 123, 2024, 1, service)
+    assert second == first

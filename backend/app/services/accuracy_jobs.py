@@ -17,10 +17,15 @@ CAPTURE_INTERVAL = timedelta(minutes=15)
 CAPTURE_WINDOW = timedelta(hours=6)
 SYNC_INTERVAL = timedelta(hours=6)
 RETRY_INTERVAL = timedelta(minutes=15)
+PRECOMPUTE_INTERVAL = timedelta(minutes=30)
 
 
 def automation_enabled():
     return os.getenv("FANTASY_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+
+
+def precompute_enabled():
+    return automation_enabled() and os.getenv("FANTASY_PRECOMPUTE_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 
 
 def nfl_season(now):
@@ -76,7 +81,8 @@ class AccuracyJobs:
             self.prepare(connection)
             connection.execute("""UPDATE accuracy_jobs SET state='error',last_finished_at=?,
                 last_error=CASE WHEN kind='capture' THEN
-                    'Capture was interrupted; it will retry if a game is still upcoming.' ELSE
+                    'Capture was interrupted; it will retry if a game is still upcoming.'
+                    WHEN kind='precompute' THEN 'Cache warmup was interrupted; it will retry.' ELSE
                     'Results sync was interrupted; it will retry when eligible.' END,
                 next_run_at=? WHERE state='running'""", (now.isoformat(), now.isoformat()))
 
@@ -108,7 +114,8 @@ class AccuracyJobs:
                 (scope, season, kind, week, now.isoformat()))
 
     def finish(self, season, scope, kind, now, *, result=None, error=None):
-        interval = RETRY_INTERVAL if error else CAPTURE_INTERVAL if kind == "capture" else SYNC_INTERVAL
+        interval = (RETRY_INTERVAL if error else PRECOMPUTE_INTERVAL if kind == "precompute"
+                    else CAPTURE_INTERVAL if kind == "capture" else SYNC_INTERVAL)
         with self.connect() as connection:
             self.prepare(connection)
             connection.execute("""UPDATE accuracy_jobs SET state=?,last_finished_at=?,
@@ -158,6 +165,9 @@ class AccuracyJobs:
                 "last_checked_at": worker["last_checked_at"] if worker else None,
                 "worker_error": worker["last_error"] if worker else None,
                 "capture": self.job(season, scope, "capture"), "sync": self.job(season, scope, "sync"),
+                "precompute": self.job(season, scope, "precompute"),
+                "precompute_enabled": precompute_enabled() and capture_enabled and scope != "weekly",
+                "precompute_interval_minutes": int(PRECOMPUTE_INTERVAL.total_seconds() // 60),
                 "poll_seconds": POLL_SECONDS, "capture_interval_minutes": 15,
                 "capture_window_hours": 6, "sync_interval_hours": 6}
 

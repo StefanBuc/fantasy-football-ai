@@ -38,10 +38,13 @@ class ESPNProjectionCache:
         ttl: timedelta = timedelta(hours=6),
         max_entries: int = 32,
         persistent: bool = False,
+        namespace: str = "espn_projections",
     ) -> None:
         self.ttl = ttl
         self.max_entries = max_entries
         self.persistent = persistent
+        self.namespace = namespace
+        self.name = "espn_league" if namespace == "espn_projections" else "espn_player_pool"
         self._entries: OrderedDict[
             tuple[int, int, int, str],
             ESPNLeagueWeekProjection,
@@ -64,7 +67,7 @@ class ESPNProjectionCache:
                 and now - entry.generated_at < self.ttl
             ):
                 self._entries.move_to_end(key)
-                logger.info("cache=espn_league result=hit season=%s week=%s", key[1], key[2])
+                logger.info("cache=%s result=hit season=%s week=%s", self.name, key[1], key[2])
                 return entry, True
 
             if entry is not None:
@@ -102,7 +105,7 @@ class ESPNProjectionCache:
     def _load_or_build(self, key, builder):
         # No global lock during disk reads, data preparation, or inference.
         if self.persistent:
-            payload = disk_cache.get("espn_projections", key)
+            payload = disk_cache.get(self.namespace, key)
             if payload is not None:
                 try:
                     data = json.loads(payload)
@@ -116,8 +119,8 @@ class ESPNProjectionCache:
                         return entry, True
                 except Exception as error:
                     logger.warning("Invalid cached ESPN projection; rebuilding: %s", error)
-        logger.info("cache=espn_league result=miss season=%s week=%s", key[1], key[2])
-        with timed_stage("espn_league_projection", season=key[1], week=key[2]):
+        logger.info("cache=%s result=miss season=%s week=%s", self.name, key[1], key[2])
+        with timed_stage(f"{self.name}_projection", season=key[1], week=key[2]):
             return builder(), False
 
     def _persist(self, key, entry):
@@ -127,7 +130,7 @@ class ESPNProjectionCache:
             ).total_seconds()
             if remaining > 0:
                 disk_cache.put(
-                    "espn_projections", key,
+                    self.namespace, key,
                     json.dumps(asdict(entry), default=lambda value: value.isoformat(),
                                allow_nan=False).encode(), remaining, self.max_entries,
                 )
@@ -140,7 +143,7 @@ class ESPNProjectionCache:
             self._pending.clear()
             self._entries.clear()
             if self.persistent:
-                disk_cache.clear("espn_projections")
+                disk_cache.clear(self.namespace)
 
 
 def roster_fingerprint(league, week: int | None = None) -> str:

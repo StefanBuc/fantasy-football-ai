@@ -33,6 +33,7 @@ def schedule(**updates):
 def clock(monkeypatch):
     now = [PREGAME]
     monkeypatch.setenv("FANTASY_AUTOMATION_ENABLED", "true")
+    monkeypatch.setenv("FANTASY_PRECOMPUTE_ENABLED", "false")
     monkeypatch.setenv("ESPN_ENABLE_LOCAL_API", "false")
     monkeypatch.setattr(history_module, "utc_now", lambda: now[0])
     monkeypatch.setattr(jobs_module, "utc_now", lambda: now[0])
@@ -367,3 +368,95 @@ def test_service_refreshes_only_after_six_hours(monkeypatch, clock):
     service.loaded_at -= 7 * 3600
     worker.service(2026)
     assert getter.call_args_list[1].kwargs == {"refresh": True}
+
+
+@pytest.fixture
+def warmup(engine, monkeypatch):
+    monkeypatch.setenv("FANTASY_PRECOMPUTE_ENABLED", "true")
+    accuracy_jobs.register(123, 2026, "public")
+    operation = Mock(return_value={"team_count": 2, "player_count": 100, "saved_count": 100, "week": 10})
+    monkeypatch.setattr(scheduler_module, "capture_league", Mock(return_value={"saved_count": 4}))
+    monkeypatch.setattr(scheduler_module, "precompute_league", operation)
+    return operation
+
+
+def test_warmup_runs_outside_capture_window_and_repeats_every_thirty_minutes(engine, clock, warmup):
+    clock[0] = KICKOFF - timedelta(days=2)
+    engine.run_once()
+    assert warmup.call_count == 1
+    scheduler_module.capture_weekly.assert_not_called()
+    assert accuracy_jobs.status(2026, "espn:123")["precompute"]["result"]["player_count"] == 100
+    clock[0] += timedelta(minutes=29)
+    engine.run_once()
+    assert warmup.call_count == 1
+    clock[0] += timedelta(minutes=2)
+    engine.run_once()
+    assert warmup.call_count == 2
+
+
+def test_restart_warms_process_data_even_with_recent_durable_success(engine, clock, warmup, monkeypatch):
+    engine.run_once()
+    restarted = AccuracyScheduler(clock=lambda: clock[0])
+    monkeypatch.setattr(restarted, "schedule", engine.schedule)
+    monkeypatch.setattr(restarted, "service", engine.service)
+    restarted.run_once()
+    assert warmup.call_count == 2
+
+
+def test_warmup_failures_back_off_across_restart_without_leaking_details(engine, clock, warmup, monkeypatch, caplog):
+    warmup.side_effect = RuntimeError("private-cookie")
+    engine.run_once()
+    assert warmup.call_count == 1
+    restarted = AccuracyScheduler(clock=lambda: clock[0])
+    monkeypatch.setattr(restarted, "schedule", engine.schedule)
+    monkeypatch.setattr(restarted, "service", engine.service)
+    clock[0] += timedelta(minutes=14)
+    restarted.run_once()
+    assert warmup.call_count == 1
+    clock[0] += timedelta(minutes=1)
+    warmup.side_effect = None
+    restarted.run_once()
+    assert warmup.call_count == 2
+    assert accuracy_jobs.job(2026, "espn:123", "precompute")["state"] == "success"
+    assert "private-cookie" not in caplog.text
+
+
+def test_disabled_and_offseason_warmup_do_not_load_models(engine, clock, warmup, monkeypatch):
+    clock[0] = KICKOFF - timedelta(days=8)
+    engine.run_once()
+    warmup.assert_not_called()
+    clock[0] = KICKOFF + timedelta(days=2)
+    engine.run_once()
+    warmup.assert_not_called()
+    clock[0] = KICKOFF - timedelta(days=1)
+    monkeypatch.setenv("FANTASY_PRECOMPUTE_ENABLED", "false")
+    engine.run_once()
+    warmup.assert_not_called()
+
+
+def test_capture_is_not_delayed_by_warmup_failure(engine, clock, warmup):
+    warmup.side_effect = RuntimeError("Failed warmup")
+    engine.run_once()
+    assert accuracy_jobs.job(2026, "weekly", "capture")["state"] == "success"
+    assert accuracy_jobs.job(2026, "espn:123", "precompute")["state"] == "error"
+
+
+def test_week_rollover_bypasses_previous_weeks_warmup_timer(engine, clock, warmup, monkeypatch):
+    engine.run_once()
+    games = schedule(week=11)
+    monkeypatch.setattr(engine, "schedule", lambda *_: games)
+    clock[0] += timedelta(minutes=1)
+    engine.run_once()
+    assert warmup.call_count == 2
+    assert accuracy_jobs.job(2026, "espn:123", "precompute")["week"] == 11
+
+
+def test_warmup_skips_unavailable_saved_and_old_season_targets(engine, clock, warmup, monkeypatch):
+    monkeypatch.setenv("FANTASY_AUTH_ENABLED", "true")
+    accuracy_jobs.register(456, 2026, "saved")
+    accuracy_jobs.register(789, 2026, "saved")
+    accuracy_jobs.register(222, 2025, "public")
+    monkeypatch.setattr(scheduler_module.accounts, "connections", lambda: [
+        {"league_id": 456, "season": 2026, "mode": "private", "status": "expired"}])
+    engine.run_once()
+    assert [call.args[1]["scope"] for call in warmup.call_args_list] == ["espn:123"]

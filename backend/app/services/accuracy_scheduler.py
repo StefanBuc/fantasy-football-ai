@@ -11,7 +11,7 @@ from app.config.espn_config import get_local_espn_config, local_espn_api_enabled
 from app.config.security import auth_enabled
 from app.services.account_store import accounts
 from app.services.accuracy_jobs import (
-    accuracy_jobs, automation_enabled, operation_lock, run_tracked_sync,
+    accuracy_jobs, automation_enabled, precompute_enabled, operation_lock, run_tracked_sync,
     CAPTURE_WINDOW, POLL_SECONDS,
     nfl_season,
 )
@@ -20,7 +20,7 @@ from app.services.prediction_actuals import sync_actuals, next_morning
 from app.services.projection_registry import projection_services
 from app.services.projection_slate import build_projection_requests
 from app.services.projection_types import PlayerProjectionRequest
-from app.services.performance import logger
+from app.services.performance import logger, timed_stage
 
 
 def capture_windows(schedule, season, now):
@@ -46,6 +46,23 @@ def current_local_config():
         return get_local_espn_config()
     except RuntimeError:
         return None
+
+
+def precompute_week(schedule, season, now):
+    """Warm during the regular season, starting one week before opening kickoff."""
+    if schedule is None or not {"season", "week"}.issubset(schedule.columns):
+        return None
+    games = [(kickoff, int(week))
+             for week in schedule.loc[schedule.season == season, "week"].dropna().unique()
+             if 1 <= int(week) <= 18
+             for _, kickoff, _ in game_times(schedule, season, int(week)).values()]
+    upcoming = sorted((kickoff, week) for kickoff, week in games if now < kickoff)
+    if upcoming and upcoming[0][0] <= now + timedelta(days=7):
+        return upcoming[0][1]
+    # Keep the last regular-season week's pages warm while its games finish.
+    recent = sorted((kickoff, week) for kickoff, week in games
+                    if now - timedelta(days=1) <= kickoff <= now)
+    return recent[-1][1] if recent else None
 
 
 def capture_weekly(service, season, week, teams, schedule):
@@ -90,8 +107,18 @@ def capture_weekly(service, season, week, teams, schedule):
 def capture_league(service, target, week, schedule, config):
     # Reuse the same matching, QB signals and live injury adjustments as Players.
     # Import lazily: routes also register leagues with the scheduling store.
-    from app.integrations.espn_fantasy import get_league
     from app.routes.espn import project_league_players
+
+    league_id, league = load_target_league(target, config)
+    _, saved = project_league_players(
+        league, league_id, target["season"], week, service=service,
+        strict_history=True, history_schedule=schedule,
+    )
+    return {"saved_count": saved}
+
+
+def load_target_league(target, config):
+    from app.integrations.espn_fantasy import get_league
 
     league_id = int(target["scope"].split(":", 1)[1])
     if target["mode"] == "saved":
@@ -99,12 +126,23 @@ def capture_league(service, target, week, schedule, config):
         if config is None:
             raise RuntimeError("Saved private-league connection is unavailable.")
     credentials = {"espn_s2": config.espn_s2, "swid": config.swid} if target["mode"] in {"local", "saved"} else {}
-    league = get_league(league_id=league_id, year=target["season"], **credentials)
-    _, saved = project_league_players(
+    return league_id, get_league(league_id=league_id, year=target["season"], **credentials)
+
+
+def precompute_league(service, target, week, schedule, config):
+    from app.routes.espn import cached_league_projection, project_league_players
+
+    league_id, league = load_target_league(target, config)
+    # Match the week shown on first opening the app, including ESPN's rollover.
+    current = getattr(league, "current_week", week)
+    week = int(current) if isinstance(current, int) and 1 <= current <= 18 else week
+    projection, _ = cached_league_projection(league, league_id, target["season"], week, service)
+    pool, saved = project_league_players(
         league, league_id, target["season"], week, service=service,
         strict_history=True, history_schedule=schedule,
     )
-    return {"saved_count": saved}
+    return {"team_count": len(projection.team_projections), "player_count": pool.player_count,
+            "saved_count": saved, "week": week}
 
 
 class AccuracyScheduler:
@@ -114,6 +152,7 @@ class AccuracyScheduler:
         self.thread = None
         self.schedules = {}
         self.schedule_retry_at = None
+        self.precomputed = set()
 
     def start(self):
         if self.thread is None and automation_enabled():
@@ -154,7 +193,8 @@ class AccuracyScheduler:
     def execute(self, season, scope, kind, operation, week=None):
         accuracy_jobs.begin(season, scope, kind, self.clock(), week)
         try:
-            result = operation()
+            with timed_stage("automatic_job", kind=kind, season=season, week=week):
+                result = operation()
         except Exception as error:
             logger.warning("Automatic accuracy job=%s failed type=%s", kind, type(error).__name__)
             accuracy_jobs.finish(season, scope, kind, self.clock(),
@@ -188,6 +228,7 @@ class AccuracyScheduler:
             and target["season"] == config.season))
 
         windows = {}
+        schedule = None
         if self.schedule_retry_at is None or now >= self.schedule_retry_at:
             try:
                 schedule = self.schedule(season, now)
@@ -227,5 +268,25 @@ class AccuracyScheduler:
                         prediction_history, group_season, scope, automatic=True))
                 except Exception as error:
                     logger.warning("Automatic results sync failed type=%s", type(error).__name__)
+
+        # Accuracy captures/syncs have priority. Warm the same page caches on
+        # startup and every 30 minutes without waiting for a visitor to log in.
+        week = precompute_week(schedule, season, self.clock())
+        if precompute_enabled() and week is not None:
+            for target in targets:
+                if self.stopped.is_set():
+                    return
+                if target["mode"] == "weekly":
+                    continue
+                scope = target["scope"]
+                key = (season, scope, week)
+                job = accuracy_jobs.job(season, scope, "precompute")
+                # Every API process warms its own in-memory data after restart;
+                # failed attempts still honor the durable 15-minute backoff.
+                startup = key not in self.precomputed and (job is None or job["state"] != "error")
+                if startup or accuracy_jobs.due(season, scope, "precompute", self.clock(), week):
+                    self.precomputed.add(key)
+                    self.execute(season, scope, "precompute", lambda target=target: precompute_league(
+                        self.service(season), target, week, schedule, config), week)
         accuracy_jobs.heartbeat(self.clock(),
             "NFL schedule unavailable; checking again in 15 minutes." if self.schedule_retry_at else None)
