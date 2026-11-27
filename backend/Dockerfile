@@ -16,9 +16,9 @@ COPY requirements.txt ./requirements.txt
 RUN --mount=type=cache,id=fantasy-football-pip,target=/root/.cache/pip,sharing=locked \
     python -m pip install --only-binary=:all: -r requirements.txt
 
-# Install CUDA-enabled PyTorch for GPU inference.
-ARG TORCH_VERSION=2.15.0
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu134
+# CUDA 12.6 retains Pascal support, including the Quadro P1000 (sm_61).
+ARG TORCH_VERSION=2.14.1
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
 RUN --mount=type=cache,id=fantasy-football-pip,target=/root/.cache/pip,sharing=locked \
     python -m pip install "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}" \
     && python -m pip check

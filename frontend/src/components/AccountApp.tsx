@@ -5,7 +5,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { configureSession, sendJson, setActiveConnection } from '../lib/api'
 import { viewCache } from '../lib/viewCache'
 import { deleteConnection, getConnections, getSession, importConfiguredLeague, saveConnection,
-  saveConnectionPreferences, saveOwnerPreferences, signIn, signOut,
+  saveConnectionPreferences, saveMyTeam, saveOwnerPreferences, signIn, signOut,
   type DashboardView, type OwnerPreferences, type OwnerSession, type SavedConnection } from '../lib/account'
 import type { ESPNLeague } from '../types/api'
 import { navigate, useSitePath } from '../lib/navigation'
@@ -178,6 +178,17 @@ export default function AccountApp() {
     finally { setBusy(false) }
   }
 
+  async function setMyTeam(teamId: number | null) {
+    if (!dashboard) return
+    const id = dashboard.connection.id
+    const version = generation.current
+    const next = await saveMyTeam(id, teamId)
+    if (!mounted.current || generation.current !== version) return
+    setConnections((rows) => rows.map((row) => row.id === id ? { ...row, my_team_id: next.my_team_id } : row))
+    setDashboard((current) => current?.connection.id === id
+      ? { ...current, connection: { ...current.connection, my_team_id: next.my_team_id } } : current)
+  }
+
   if (session && !session.auth_enabled) return <LegacyApp />
   if (path !== '/app' && path !== '/login') return <PublicSite authenticated={session?.authenticated} page={path} />
   if (!session?.authenticated) return <SignInPage session={session} error={error} busy={busy}
@@ -188,7 +199,8 @@ export default function AccountApp() {
     {error && <p role="alert" className="bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     <LeagueDashboard key={dashboard.connection.id} league={dashboard.league}
       connectionMode={dashboard.connection.mode === 'private' ? 'local' : 'public'}
-      initialTeamId={dashboard.connection.preferred_team_id} initialView={dashboard.connection.default_view}
+      initialTeamId={dashboard.connection.my_team_id ?? dashboard.connection.preferred_team_id} initialView={dashboard.connection.default_view}
+      myTeamId={dashboard.connection.my_team_id ?? null} onMyTeamChange={setMyTeam}
       onPreferencesChange={(team, view: DashboardView) => {
         queue.current = queue.current.then(() => saveConnectionPreferences(dashboard.connection.id, team, view))
           .catch((caught) => { if (mounted.current) setError(message(caught)) })

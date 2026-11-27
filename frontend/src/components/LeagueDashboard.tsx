@@ -24,6 +24,7 @@ import { useLiveScores } from '../lib/useLiveScores'
 import { OptimizedLineupView } from './OptimizedLineupView'
 import { TradeAnalyzerView } from './TradeAnalyzerView'
 import type { DashboardView } from '../lib/account'
+import { MyTeamPicker } from './MyTeamPicker'
 
 export type ConnectionMode = 'public' | 'local'
 
@@ -38,6 +39,8 @@ type LeagueDashboardProps = {
   onPreferencesChange?: (teamId: number, view: DashboardView) => void
   onSignOut?: () => void
   onHome?: () => void
+  myTeamId?: number | null
+  onMyTeamChange?: (teamId: number | null) => Promise<void>
 }
 
 const weeks = Array.from({ length: 18 }, (_, index) => index + 1)
@@ -303,6 +306,8 @@ export function LeagueDashboard({
   onPreferencesChange,
   onSignOut,
   onHome,
+  myTeamId = null,
+  onMyTeamChange,
 }: LeagueDashboardProps) {
   const initialTeam = league.teams.find((team) => team.team_id === initialTeamId)?.team_id ?? league.teams[0]?.team_id ?? 0
   const [selectedTeamId, setSelectedTeamId] = useState(
@@ -422,10 +427,18 @@ export function LeagueDashboard({
     setError(null)
   }
 
+  function changeView(view: DashboardView) {
+    const ownTeam = league.teams.find((team) => team.team_id === myTeamId)
+    const teamId = view === 'team' ? ownTeam?.team_id ?? selectedTeamId : selectedTeamId
+    if (teamId !== selectedTeamId) { setSelectedTeamId(teamId); setProjection(null); setError(null) }
+    setActiveView(view)
+    onPreferencesChange?.(teamId, view)
+  }
+
   return (
     <div className="min-h-screen bg-[#f3f5f2] text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <header className="bg-slate-950 text-white shadow-lg">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-8">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-lime-300 font-black text-slate-950">
               FF
@@ -448,6 +461,7 @@ export function LeagueDashboard({
             </button>
           </div>
         </div>
+        {onMyTeamChange && <MyTeamPicker teams={league.teams} value={myTeamId} onChange={onMyTeamChange} onOpen={() => changeView('team')} />}
         <nav className="mx-auto flex max-w-7xl gap-7 overflow-x-auto px-4 sm:px-8" aria-label="League navigation">
           {([
             ['team', 'My team'],
@@ -461,7 +475,7 @@ export function LeagueDashboard({
             <button
               key={view}
               type="button"
-              onClick={() => { setActiveView(view); onPreferencesChange?.(selectedTeamId, view) }}
+              onClick={() => changeView(view)}
               className={`shrink-0 whitespace-nowrap border-b-2 pb-3 text-sm font-black transition ${
                 activeView === view
                   ? 'border-lime-300 text-white'

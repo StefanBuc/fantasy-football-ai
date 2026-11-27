@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { configureSession, setActiveConnection, sendJson, getLocalTeamProjections, getTeamLogoUrl } from '../src/lib/api.ts'
-import { getSession } from '../src/lib/account.ts'
+import { getSession, saveMyTeam } from '../src/lib/account.ts'
 
 test('concurrent session initialization shares one server-issued CSRF/cookie pair', async (t) => {
   const reply = Promise.withResolvers()
@@ -13,6 +13,19 @@ test('concurrent session initialization shares one server-issued CSRF/cookie pai
   reply.resolve(new Response('{"authenticated":false,"csrf_token":"one"}'))
   assert.equal((await first).csrf_token, 'one')
   assert.equal((await second).csrf_token, 'one')
+})
+
+test('My team is saved as its own preference without overwriting the viewed team or tab', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{"my_team_id":2}')))
+  configureSession('test-csrf', true)
+  t.after(() => configureSession('', false))
+  const result = await saveMyTeam('league-one', 2)
+  const [path, options] = fetch.mock.calls[0].arguments
+  assert.equal(path, '/api/account/connections/league-one/my-team')
+  assert.equal(options.method, 'PATCH')
+  assert.equal(options.headers['X-CSRF-Token'], 'test-csrf')
+  assert.deepEqual(JSON.parse(options.body), { team_id: 2 })
+  assert.equal(result.my_team_id, 2)
 })
 
 test('authenticated writes attach a CSRF token and saved-connection context without exposing ESPN credentials', async (t) => {

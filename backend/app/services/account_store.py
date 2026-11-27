@@ -49,7 +49,7 @@ class AccountStore:
                 CREATE TABLE IF NOT EXISTS connections (
                     id TEXT PRIMARY KEY, league_id INTEGER NOT NULL, season INTEGER NOT NULL,
                     name TEXT NOT NULL, mode TEXT NOT NULL, credentials TEXT,
-                    preferred_team_id INTEGER, default_view TEXT NOT NULL DEFAULT 'team',
+                    preferred_team_id INTEGER, my_team_id INTEGER, default_view TEXT NOT NULL DEFAULT 'team',
                     status TEXT NOT NULL DEFAULT 'connected', UNIQUE(league_id,season));
             """)
             if "origin" not in {row[1] for row in db.execute("PRAGMA table_info(sessions)")}:
@@ -57,6 +57,11 @@ class AccountStore:
                     db.execute("BEGIN IMMEDIATE")
                     if "origin" not in {row[1] for row in db.execute("PRAGMA table_info(sessions)")}:
                         db.execute("ALTER TABLE sessions ADD COLUMN origin TEXT")
+            if "my_team_id" not in {row[1] for row in db.execute("PRAGMA table_info(connections)")}:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    if "my_team_id" not in {row[1] for row in db.execute("PRAGMA table_info(connections)")}:
+                        db.execute("ALTER TABLE connections ADD COLUMN my_team_id INTEGER")
             with db:
                 yield db
         finally:
@@ -156,7 +161,7 @@ class AccountStore:
 
     def connections(self):
         with self.connect() as db:
-            return [dict(row) for row in db.execute("SELECT id,league_id,season,name,mode,preferred_team_id,default_view,status FROM connections ORDER BY name,season DESC")]
+            return [dict(row) for row in db.execute("SELECT id,league_id,season,name,mode,preferred_team_id,my_team_id,default_view,status FROM connections ORDER BY name,season DESC")]
 
     def connection(self, id):
         return next((row for row in self.connections() if row["id"] == id), None)
@@ -195,6 +200,10 @@ class AccountStore:
             raise ValueError("Unknown dashboard view.")
         with self.connect() as db:
             db.execute("UPDATE connections SET preferred_team_id=?,default_view=? WHERE id=?", (team_id, view, id))
+
+    def my_team(self, id, team_id):
+        with self.connect() as db:
+            db.execute("UPDATE connections SET my_team_id=? WHERE id=?", (team_id, id))
 
     def preferences(self, *, theme, active_connection):
         if theme not in {"system", "light", "dark"}:

@@ -45,6 +45,10 @@ class ConnectionPreferences(BaseModel):
     default_view: Literal["team", "optimized", "trade", "matchup", "players", "league", "accuracy"] = "team"
 
 
+class MyTeamPreference(BaseModel):
+    team_id: int | None = Field(default=None, gt=0)
+
+
 def owner_required(request):
     if not auth_enabled() or not getattr(request.state, "owner_authenticated", False):
         raise HTTPException(401, "Sign in to manage saved connections.")
@@ -169,17 +173,22 @@ def open_connection(id: str, request: Request):
     row = accounts.connection(id)
     if row is None:
         raise HTTPException(404, "Saved connection not found.")
-    config = accounts.private_config(id) if row["mode"] == "private" else None
+    league = connection_league(row)
+    from app.routes.espn import build_league_connect_response
+    register_league_tracking(row["league_id"], row["season"], "saved" if row["mode"] == "private" else "public")
+    return build_league_connect_response(league, row["league_id"], row["season"])
+
+
+def connection_league(row):
+    config = accounts.private_config(row["id"]) if row["mode"] == "private" else None
     try:
         league = validated_league(row["league_id"], row["season"], config.swid if config else None,
                                  config.espn_s2 if config else None)
     except HTTPException as error:
         if error.status_code == 403:
-            accounts.mark_expired(id)
+            accounts.mark_expired(row["id"])
         raise
-    from app.routes.espn import build_league_connect_response
-    register_league_tracking(row["league_id"], row["season"], "saved" if config else "public")
-    return build_league_connect_response(league, row["league_id"], row["season"])
+    return league
 
 
 @router.delete("/account/connections/{id}")
@@ -210,4 +219,18 @@ def update_connection_preferences(id: str, payload: ConnectionPreferences, reque
     if not accounts.connection(id):
         raise HTTPException(404, "Saved connection not found.")
     accounts.connection_preferences(id, payload.preferred_team_id, payload.default_view)
+    return accounts.connection(id)
+
+
+@router.patch("/account/connections/{id}/my-team")
+def update_my_team(id: str, payload: MyTeamPreference, request: Request):
+    owner_required(request)
+    row = accounts.connection(id)
+    if row is None:
+        raise HTTPException(404, "Saved connection not found.")
+    if payload.team_id is not None:
+        league = connection_league(row)
+        if payload.team_id not in {int(team.team_id) for team in league.teams}:
+            raise HTTPException(400, "That team does not belong to this league.")
+    accounts.my_team(id, payload.team_id)
     return accounts.connection(id)

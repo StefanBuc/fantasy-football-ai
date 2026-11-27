@@ -6,7 +6,8 @@ services:
     build:
       context: ./backend
       args:
-        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu134
+        TORCH_VERSION: ${TORCH_VERSION:-2.14.1}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}
     init: true
     restart: unless-stopped
     env_file:

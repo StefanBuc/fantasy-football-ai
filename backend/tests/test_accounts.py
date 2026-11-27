@@ -1,5 +1,9 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
+from urllib.error import HTTPError, URLError
+import sqlite3
+
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from fastapi.testclient import TestClient
 import pytest
@@ -65,6 +69,89 @@ def save_private(client):
         'mode': 'private', 'swid': 'secret-swid-value', 'espn_s2': 'secret-s2-value'})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+@pytest.mark.parametrize(('failure', 'expected'), [
+    (HTTPError('https://upstream.invalid/data?espn_s2=secret-value', 404, 'secret-value', None, None), 'upstream source returned HTTP 404'),
+    (URLError('secret-value'), 'data could not be downloaded'),
+    (RequestsConnectionError('secret-value'), 'data could not be downloaded'),
+    (TimeoutError('secret-value'), 'data could not be downloaded'),
+    (FileNotFoundError('secret-value'), 'trained model checkpoints'),
+    (PermissionError('secret-value'), 'permissions on the model and data mounts'),
+    (sqlite3.OperationalError('secret-value'), 'Application storage is unavailable'),
+    (OSError('secret-value'), 'required I/O operation'),
+])
+def test_matchup_io_errors_identify_the_subsystem_without_exposing_credentials(
+    secured, monkeypatch, caplog, failure, expected,
+):
+    login(secured)
+    monkeypatch.setattr(espn, 'get_public_league', Mock(return_value=object()))
+    monkeypatch.setattr(espn, 'build_matchup_response', Mock(side_effect=failure))
+    response = secured.post('/api/espn/matchup', json={
+        'league_id': 123, 'season': 2026, 'week': 12, 'team_id': 1,
+    })
+    assert response.status_code == 503
+    assert expected in response.json()['detail']
+    assert 'Account storage' not in response.text
+    assert 'no-store' in response.headers['cache-control']
+    assert 'secret-value' not in response.text + caplog.text
+    assert 'upstream.invalid' not in response.text + caplog.text
+    assert 'request_failure stage=application' in caplog.text
+    assert type(failure).__name__ in caplog.text
+
+
+def test_failed_session_lookup_reports_account_storage_and_keeps_apis_protected(secured, monkeypatch, caplog):
+    login(secured)
+    monkeypatch.setattr(accounts, 'session', Mock(side_effect=sqlite3.OperationalError('secret-value')))
+    response = secured.get('/api/account/connections')
+    assert response.status_code == 503
+    assert 'Account storage is unavailable' in response.json()['detail']
+    assert 'secret-value' not in response.text + caplog.text
+    assert 'request_failure stage=account' in caplog.text
+
+
+def test_my_team_is_validated_saved_per_league_and_independent_of_browsing(secured, fake_league):
+    league, _ = fake_league
+    league.teams.append(SimpleNamespace(**{**vars(league.teams[0]), 'team_id': 2, 'team_name': 'Team two'}))
+    login(secured)
+    row = save_private(secured)
+    second = secured.post('/api/account/connections', json={
+        'league_id': 456, 'season': 2026, 'mode': 'public',
+    }).json()
+    route = f"/api/account/connections/{row['id']}/my-team"
+    assert secured.patch(route, json={'team_id': 1}).json()['my_team_id'] == 1
+    response = secured.patch(f"/api/account/connections/{row['id']}/preferences", json={
+        'preferred_team_id': 2, 'default_view': 'matchup',
+    })
+    assert response.json()['my_team_id'] == 1
+    assert response.json()['preferred_team_id'] == 2
+    assert accounts.connection(second['id'])['my_team_id'] is None
+    assert secured.patch(route, json={'team_id': 999}).status_code == 400
+    assert secured.patch(route, json={'team_id': 0}).status_code == 422
+    assert accounts.connection(row['id'])['my_team_id'] == 1
+    assert secured.patch(route, json={'team_id': 2}, headers={'X-CSRF-Token':'wrong'}).status_code == 403
+    assert secured.patch('/api/account/connections/missing/my-team', json={'team_id':1}).status_code == 404
+    secured.post('/api/auth/logout')
+    assert secured.patch(route, json={'team_id':2}).status_code == 401
+    login(secured)
+    assert accounts.connection(row['id'])['my_team_id'] == 1
+    assert secured.patch(route, json={'team_id': None}).json()['my_team_id'] is None
+    assert accounts.connection(row['id'])['preferred_team_id'] == 2
+
+
+def test_my_team_migration_preserves_existing_connections_and_credentials(secured, fake_league):
+    login(secured)
+    row = save_private(secured)
+    accounts.connection_preferences(row['id'], 1, 'optimized')
+    with accounts.connect() as db:
+        encrypted = db.execute('SELECT credentials FROM connections').fetchone()[0]
+        db.execute('ALTER TABLE connections DROP COLUMN my_team_id')
+    migrated = accounts.connection(row['id'])
+    assert migrated['my_team_id'] is None
+    assert migrated['preferred_team_id'] == 1 and migrated['default_view'] == 'optimized'
+    with accounts.connect() as db:
+        assert db.execute('SELECT credentials FROM connections').fetchone()[0] == encrypted
+    assert accounts.private_config(row['id']).espn_s2 == 'secret-s2-value'
 
 
 def test_all_data_and_docs_require_auth_even_with_localhost_or_spoofed_headers(secured):

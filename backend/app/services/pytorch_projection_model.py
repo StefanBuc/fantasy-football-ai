@@ -1,4 +1,5 @@
 from pathlib import Path
+from functools import lru_cache
 import torch
 import torch.nn as nn
 import json
@@ -9,8 +10,33 @@ import numpy as np
 from app.config.model_config import (
     SELECTED_PYTORCH_MODEL_VERSIONS,
 )
+from app.services.performance import logger
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+
+@lru_cache(maxsize=1)
+def inference_device():
+    """CUDA visibility alone does not mean the wheel supports the GPU's kernels."""
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
+    major, minor = torch.cuda.get_device_capability()
+    capability = major * 10 + minor
+    architectures = torch.cuda.get_arch_list()
+    native = [int(arch[3:]) for arch in architectures
+              if arch.startswith("sm_") and arch[3:].isdigit()]
+    ptx = [int(arch[8:]) for arch in architectures
+           if arch.startswith("compute_") and arch[8:].isdigit()]
+    compatible = (any(code // 10 == major and code <= capability for code in native)
+                  or any(code <= capability for code in ptx))
+    if architectures and not compatible:
+        logger.warning(
+            "[PyTorch] Using CPU: GPU %s (sm_%s) is unsupported by this PyTorch build (%s).",
+            torch.cuda.get_device_name(), capability, ", ".join(architectures),
+        )
+        return torch.device("cpu")
+    return torch.device("cuda")
+
 
 def scaler_from_state(state):
     scaler = StandardScaler()
@@ -25,7 +51,7 @@ def scaler_from_state(state):
 
 def load_projection_checkpoint(checkpoint_path: str | Path, device: torch.device | None = None):
     if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = inference_device()
     
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     

@@ -5,7 +5,7 @@ export type OwnerPreferences = { username: string; theme: 'system' | 'light' | '
 export type OwnerSession = { auth_enabled: boolean; authenticated: boolean; configured?: boolean;
   csrf_token?: string; public_url?: string; login_origin?: string; owner?: OwnerPreferences | null }
 export type SavedConnection = { id: string; league_id: number; season: number; name: string;
-  mode: 'public' | 'private'; preferred_team_id: number | null; default_view: DashboardView;
+  mode: 'public' | 'private'; preferred_team_id: number | null; my_team_id: number | null; default_view: DashboardView;
   status: 'connected' | 'reauth_required' }
 export type ConnectionInput = { league_id: number; season: number; mode: 'public' | 'private'; swid?: string; espn_s2?: string }
 
@@ -26,3 +26,5 @@ export const importConfiguredLeague = () => sendJson<SavedConnection>('/api/acco
 export const saveOwnerPreferences = (input: OwnerPreferences) => sendJson<OwnerPreferences>('/api/account/preferences', input, 'PATCH')
 export const saveConnectionPreferences = (id: string, preferred_team_id: number, default_view: DashboardView) =>
   sendJson<SavedConnection>(`/api/account/connections/${id}/preferences`, { preferred_team_id, default_view }, 'PATCH')
+export const saveMyTeam = (id: string, team_id: number | null) =>
+  sendJson<SavedConnection>(`/api/account/connections/${id}/my-team`, { team_id }, 'PATCH')
