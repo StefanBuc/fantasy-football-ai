@@ -12,6 +12,8 @@ import pandas as pd
 from app.config.model_config import SELECTED_PYTORCH_MODEL_VERSIONS
 from app.services.performance import logger
 from app.services.projection_ranges import estimate_range
+from app.services.espn_benchmark import ESPN_SCORING
+from app.services.accuracy_insights import insights, range_result, paired
 
 
 SCORING = "Full PPR for QB/RB/WR/TE; app K/DST scoring (not custom ESPN scoring)."
@@ -70,7 +72,8 @@ class PredictionHistory:
                 PRIMARY KEY(scope, season, week, position, player_id)
             )""")
             range_columns = {"floor_points": "REAL", "ceiling_points": "REAL",
-                             "range_note": "TEXT", "range_revision": "TEXT"}
+                             "range_note": "TEXT", "range_revision": "TEXT",
+                             "espn_predicted_points": "REAL", "espn_scoring": "TEXT", "espn_recorded_at": "TEXT"}
             existing = {row[1] for row in connection.execute("PRAGMA table_info(predictions)")}
             if not set(range_columns).issubset(existing):
                 with connection:
@@ -116,18 +119,33 @@ class PredictionHistory:
                 if sample.get("is_on_bye") or sample.get("availability") == "unavailable":
                     bounds.update(floor_points=None, ceiling_points=None,
                                   range_note="Range unavailable for an availability-adjusted projection.")
+                espn_points = sample.get("espn_predicted_points")
+                has_espn = (sample.get("espn_scoring") == ESPN_SCORING and isinstance(espn_points, (int, float))
+                            and math.isfinite(espn_points) and position in {"QB", "RB", "WR", "TE"})
+                if has_espn:
+                    # A cached AI generation may be older than the archived AI.
+                    # Preserve that AI forecast but still capture a fresh ESPN observation.
+                    connection.execute("""UPDATE predictions SET espn_predicted_points=?,espn_scoring=?,espn_recorded_at=?
+                        WHERE scope=? AND season=? AND week=? AND position=? AND player_id=?
+                            AND team=? AND opponent_team=? AND kickoff=? AND kickoff>?
+                            AND actual_points IS NULL AND (espn_recorded_at IS NULL OR espn_recorded_at<=?)""",
+                        (float(espn_points), ESPN_SCORING, now.isoformat(), scope, season, week, position, str(player_id),
+                         team, opponent, kickoff.isoformat(), now.isoformat(), now.isoformat()))
                 values = (
                     scope, season, week, str(player_id), sample.get("player_name"), position,
                     team, opponent, float(points), sample.get("projection_method") or "model",
                     f"{position}_model_v{SELECTED_PYTORCH_MODEL_VERSIONS[position]}",
                     model_revision, generated_at.isoformat(), now.isoformat(), kickoff.isoformat(),
                     bounds["floor_points"], bounds["ceiling_points"], bounds["range_note"], bounds["range_revision"],
+                    float(espn_points) if has_espn else None, ESPN_SCORING if has_espn else None,
+                    now.isoformat() if has_espn else None,
                 )
                 cursor = connection.execute("""INSERT INTO predictions (
                     scope, season, week, player_id, player_name, position, team, opponent_team,
                     predicted_points, projection_method, model_version, model_revision,
-                    generated_at, recorded_at, kickoff, floor_points, ceiling_points, range_note, range_revision)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    generated_at, recorded_at, kickoff, floor_points, ceiling_points, range_note, range_revision,
+                    espn_predicted_points, espn_scoring, espn_recorded_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(scope,season,week,position,player_id) DO UPDATE SET
                         player_name=excluded.player_name, team=excluded.team,
                         opponent_team=excluded.opponent_team,
@@ -137,7 +155,13 @@ class PredictionHistory:
                         generated_at=excluded.generated_at, recorded_at=excluded.recorded_at,
                         kickoff=excluded.kickoff, floor_points=excluded.floor_points,
                         ceiling_points=excluded.ceiling_points, range_note=excluded.range_note,
-                        range_revision=excluded.range_revision
+                        range_revision=excluded.range_revision,
+                        espn_predicted_points=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
+                            AND predictions.kickoff=excluded.kickoff THEN predictions.espn_predicted_points ELSE excluded.espn_predicted_points END,
+                        espn_scoring=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
+                            AND predictions.kickoff=excluded.kickoff THEN predictions.espn_scoring ELSE excluded.espn_scoring END,
+                        espn_recorded_at=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
+                            AND predictions.kickoff=excluded.kickoff THEN predictions.espn_recorded_at ELSE excluded.espn_recorded_at END
                     WHERE predictions.kickoff > excluded.recorded_at
                         AND predictions.generated_at <= excluded.generated_at
                         AND predictions.actual_points IS NULL""", values)
@@ -178,8 +202,11 @@ class PredictionHistory:
         for row in filtered:
             row["error"] = (row["predicted_points"] - row["actual_points"]
                             if row["actual_points"] is not None else None)
+            row["range_result"] = range_result(row)
+            row["espn_error"] = row["espn_predicted_points"] - row["actual_points"] if paired(row) and row["actual_points"] is not None else None
         return {
             "season": season, "scoring": SCORING, "summary": metrics(filtered),
+            **insights(filtered),
             "by_position": [{"position": value, **metrics([row for row in filtered if row["position"] == value])}
                             for value in ("QB", "RB", "WR", "TE", "K", "DST")],
             "by_model": [{"model_version": version, "model_revision": revision, "projection_method": method,

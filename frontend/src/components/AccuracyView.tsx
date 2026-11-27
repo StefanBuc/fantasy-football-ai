@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getAccuracy, syncAccuracy, getAutomationStatus } from '../lib/api'
 import type { AccuracyReport, ESPNLeague, AutomationStatus } from '../types/api'
 import { AccuracyAutomation } from './AccuracyAutomation'
+import { AccuracyInsights } from './AccuracyInsights'
 
 const positions = ['QB', 'RB', 'WR', 'TE', 'K', 'DST']
 const weeks = Array.from({ length: 18 }, (_, i) => i + 1)
@@ -146,6 +147,7 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
           ]).map(([label, value]) => <div key={label} className={panelClass}><p className="text-xs font-bold text-slate-500">{label}</p><p className="mt-2 text-2xl font-black tabular-nums">{value}</p></div>)}
         </div>
         <p className="text-xs text-slate-500">Lower absolute error is better. Signed error = projected minus actual: positive means overprediction. Averages use scored predictions only.</p>
+        <AccuracyInsights report={report} />
 
         {report.summary.saved === 0 ? <section className={`${panelClass} py-12 text-center`}>
           <h2 className="text-lg font-black">No saved predictions for these filters yet</h2>
@@ -181,10 +183,11 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
           <section className={`${panelClass} overflow-hidden`}>
             <h2 className="font-black">Projected vs. actual</h2>
             <div className="mt-4 overflow-x-auto"><table className="w-full min-w-175 text-right text-sm tabular-nums">
-              <thead className="text-xs text-slate-500"><tr><th className="pb-3 text-left">Player</th><th>Week</th><th>Projected</th><th>Actual</th><th>Difference</th><th>Saved before kickoff</th></tr></thead>
+              <thead className="text-xs text-slate-500"><tr><th className="pb-3 text-left">Player</th><th>Week</th><th>AI</th><th>ESPN · PPR</th><th>Actual</th><th>AI difference</th><th>Saved range</th><th>Saved before kickoff</th></tr></thead>
               <tbody>{report.records.map((row) => <tr key={`${row.week}:${row.position}:${row.player_id}`} className="border-t border-slate-100">
                 <th className="py-3 text-left"><p>{row.player_name ?? row.player_id}</p><p className="mt-1 text-xs font-normal text-slate-500">{row.position} · {row.team} vs {row.opponent_team} · {methodLabel(row.projection_method)}</p></th>
-                <td>{row.week}</td><td>{points(row.predicted_points)}</td><td>{row.actual_points === null ? <span className="text-xs text-slate-500">Pending</span> : points(row.actual_points)}</td><td>{points(row.error, true)}</td>
+                <td>{row.week}</td><td>{points(row.predicted_points)}</td><td title={row.espn_recorded_at ? `ESPN projected stats converted to full PPR; observed ${new Date(row.espn_recorded_at).toLocaleString()}` : 'No ESPN forecast saved before kickoff'}>{points(row.espn_predicted_points ?? null)}</td><td>{row.actual_points === null ? <span className="text-xs text-slate-500">Pending</span> : points(row.actual_points)}</td><td>{points(row.error, true)}</td>
+                <td className="whitespace-nowrap text-xs text-slate-500">{row.floor_points != null && row.ceiling_points != null ? <>{points(row.floor_points)}–{points(row.ceiling_points)}<span className="block">{row.range_result === 'inside' ? 'Inside range' : row.range_result === 'below' ? 'Below floor' : row.range_result === 'above' ? 'Above ceiling' : 'Awaiting result'}</span></> : 'Not saved'}</td>
                 <td className="text-xs text-slate-500" title={`Generated: ${new Date(row.generated_at).toLocaleString()} | Kickoff: ${new Date(row.kickoff).toLocaleString()} | ${row.model_version} ${row.model_revision}`}>{new Date(row.recorded_at).toLocaleString()}</td>
               </tr>)}</tbody>
             </table></div>

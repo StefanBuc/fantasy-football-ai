@@ -207,12 +207,35 @@ export type AccuracyRecord = {
   recorded_at: string
   kickoff: string
   actual_updated_at: string | null
+  floor_points: number | null
+  ceiling_points: number | null
+  range_result: 'pending' | 'unavailable' | 'below' | 'inside' | 'above'
+  espn_predicted_points: number | null
+  espn_recorded_at: string | null
+  espn_error: number | null
+}
+
+export type RangeMetrics = {
+  count: number; missing: number; inside: number; below: number; above: number
+  coverage_pct: number | null; average_width: number | null
+}
+
+export type ESPNMetrics = {
+  count: number; pending: number; ai_mae: number | null; espn_mae: number | null
+  ai_closer: number; espn_closer: number; ties: number; mae_improvement: number | null
 }
 
 export type AccuracyReport = {
   season: number
   scoring: string
   summary: AccuracyMetrics
+  range_coverage: RangeMetrics & { by_position: (RangeMetrics & { position: string })[] }
+  error_distribution: {
+    count: number; median_absolute_error: number | null; p90_absolute_error: number | null; rmse: number | null
+    within_two_pct: number | null; within_five_pct: number | null; within_ten_pct: number | null
+    buckets: { label: string; count: number; pct: number | null }[]
+  }
+  espn_comparison: ESPNMetrics & { scoring: string; by_position: (ESPNMetrics & { position: string })[] }
   by_position: (AccuracyMetrics & { position: string })[]
   by_model: (AccuracyMetrics & { model_version: string; model_revision: string; projection_method: string })[]
   weekly_trend: (AccuracyMetrics & { week: number })[]

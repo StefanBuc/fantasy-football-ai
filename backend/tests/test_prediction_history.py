@@ -257,7 +257,7 @@ def test_espn_cached_response_archives_displayed_injury_adjustment(monkeypatch):
 
     monkeypatch.setattr(history_module, "utc_now", lambda: PREGAME)
     player = SimpleNamespace(playerId=501, name="Test QB", position="QB", lineupSlot="QB",
-                             injuryStatus="OUT")
+                             injuryStatus="OUT", stats={10:{'projected_breakdown':{'passingYards':250}}})
     league = SimpleNamespace(settings=SimpleNamespace(name="Test League"), teams=[
         SimpleNamespace(team_id=1, team_name="Team", roster=[player])])
     item = ESPNRosterProjection(espn_id=501, player_id="qb-1", player_name="Test QB", position="QB",
@@ -270,6 +270,7 @@ def test_espn_cached_response_archives_displayed_injury_adjustment(monkeypatch):
     assert response.cache_hit
     assert response.players[0].predicted_points == 0
     assert prediction_history.rows(2026, "espn:123")[0]["predicted_points"] == 0
+    assert prediction_history.rows(2026, "espn:123")[0]["espn_predicted_points"] == 10
     player.injuryStatus = "ACTIVE"
     monkeypatch.setattr(history_module, "utc_now", lambda: KICKOFF)
     response = espn.build_team_projection_response(league, 123, 2026, 1, 10, service)

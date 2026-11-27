@@ -711,6 +711,7 @@ def test_league_players_include_rostered_and_available(
         percent_owned=96.5,
         percent_started=70.0,
         avg_points=14.75,
+        stats={3:{'projected_breakdown':{'rushingYards':50,'receivingReceptions':1}}},
     )
     available_player = SimpleNamespace(
         playerId=502,
@@ -747,6 +748,9 @@ def test_league_players_include_rostered_and_available(
         lambda season: FakeESPNProjectionService(),
     )
 
+    archive = Mock(wraps=espn_route.record_predictions)
+    monkeypatch.setattr(espn_route, 'record_predictions', archive)
+
     client = TestClient(app)
     response = client.post(
         "/api/espn/players",
@@ -763,6 +767,7 @@ def test_league_players_include_rostered_and_available(
     assert body["available_count"] == 1
     assert body["rostered_count"] == 1
     assert body["roster_week"] == 3
+    assert archive.call_args.kwargs['samples'][0]['espn_predicted_points'] == 6
 
     players = {
         player["espn_id"]: player
