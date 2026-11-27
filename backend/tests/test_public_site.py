@@ -42,6 +42,7 @@ def test_public_summary_is_anonymous_readonly_and_never_loads_models(visitor, mo
     assert response.json()['compared'] == 0
     assert response.json()['mae'] is None
     assert response.json()['within_five_pct'] is None
+    assert response.json()['homepage'] == {'average_miss':'—','within_five':'—','graded':'0','pending':'0'}
     assert not prediction_history.path.exists()
     assert not account_path().exists()
     load.assert_not_called()
@@ -59,6 +60,7 @@ def test_public_metrics_only_include_nfl_wide_results_and_show_sample_size(visit
     assert (data['saved'], data['compared'], data['pending']) == (3, 2, 1)
     assert data['mae'] == 7
     assert data['within_five_pct'] == 50
+    assert data['homepage'] == {'average_miss':'7.00 pts','within_five':'50.0%','graded':'2','pending':'1'}
     assert (data['model_compared'], data['fallback_compared']) == (1, 1)
     assert (data['latest_week'], data['latest_week_compared'], data['latest_week_mae']) == (12, 1, 10)
     assert data['last_result_update'] == '2026-11-25T15:00:00+00:00'
@@ -73,6 +75,14 @@ def test_private_only_history_cannot_be_inferred_from_public_counts(visitor):
     assert response.json()['saved'] == 0
     assert response.json()['compared'] == 0
     assert response.json()['state'] == 'collecting'
+    assert response.json()['homepage']['graded'] == '0'
+
+
+def test_homepage_formats_genuine_zero_error_without_treating_it_as_missing(visitor):
+    record('exact', predicted=0, actual=0)
+    result = visitor.get('/api/public/performance').json()
+    assert result['homepage']['average_miss'] == '0.00 pts'
+    assert result['homepage']['within_five'] == '100.0%'
 
 
 def test_public_summary_caches_reads_and_does_not_change_saved_records(visitor, monkeypatch):

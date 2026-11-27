@@ -5,7 +5,7 @@ from datetime import date
 import sqlite3
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from app.services.prediction_history import prediction_history, SCORING, utc_now
 from app.services.accuracy_jobs import nfl_season
@@ -30,6 +30,17 @@ class PublicPerformance(BaseModel):
     latest_week: int | None = None
     latest_week_mae: float | None = None
     latest_week_compared: int = 0
+
+    @computed_field
+    @property
+    def homepage(self) -> dict[str, str]:
+        """Null-safe display values for Homepage's text-format widget mappings."""
+        return {
+            "average_miss": f"{self.mae:.2f} pts" if self.mae is not None else "—",
+            "within_five": f"{self.within_five_pct:.1f}%" if self.within_five_pct is not None else "—",
+            "graded": f"{self.compared:,}",
+            "pending": f"{self.pending:,}",
+        }
 
 
 def read_public_performance(season):

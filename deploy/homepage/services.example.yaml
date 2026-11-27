@@ -1,0 +1,26 @@
+# Merge this entry into a group in Homepage's services.yaml.
+# Widget requests run from the Homepage container, so localhost means Homepage.
+# Use the Tailscale URL on this server; other installations should change it.
+- Apps:
+    - Fantasy Football AI:
+        icon: https://ffa.stefanb.me/logo.svg
+        href: https://ffa.stefanb.me/
+        description: Weekly NFL projections and accuracy
+        siteMonitor: http://100.94.147.92:8090/api/health/
+        widget:
+          type: customapi
+          url: http://100.94.147.92:8090/api/public/performance
+          refreshInterval: 60000
+          mappings:
+            - field: homepage.average_miss
+              label: AVG MISS
+              format: text
+            - field: homepage.within_five
+              label: WITHIN 5 PTS
+              format: text
+            - field: homepage.graded
+              label: GRADED
+              format: text
+            - field: homepage.pending
+              label: PENDING
+              format: text
