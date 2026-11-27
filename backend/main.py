@@ -16,6 +16,7 @@ from app.config.security import public_origin, auth_enabled, tailscale_origin
 from app.services.auth_middleware import protect_request
 from app.routes.account import router as account_router
 from app.routes.public import router as public_router
+from app.routes.training import router as training_router
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
@@ -53,7 +54,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-CSRF-Token", "X-League-Connection"],
-    expose_headers=["X-Response-Time-ms"],
+    expose_headers=["X-Response-Time-ms", "Retry-After"],
 )
 
 app.middleware("http")(protect_request)
@@ -97,3 +98,4 @@ app.include_router(espn_router)
 app.include_router(accuracy_router)
 app.include_router(account_router)
 app.include_router(public_router)
+app.include_router(training_router)

@@ -1,5 +1,16 @@
 name: fantasy-football-ai
 
+x-training-environment: &training-environment
+  FANTASY_MODEL_RUNS_PATH: /app/data/retraining
+  FANTASY_RETRAIN_ENABLED: ${FANTASY_RETRAIN_ENABLED:-true}
+  FANTASY_TRAINING_TIMEZONE: ${FANTASY_TRAINING_TIMEZONE:-America/Toronto}
+  FANTASY_TRAINING_WEEKDAY: ${FANTASY_TRAINING_WEEKDAY:-1}
+  FANTASY_TRAINING_HOUR: ${FANTASY_TRAINING_HOUR:-5}
+  FANTASY_TRAINING_DEVICE: ${FANTASY_TRAINING_DEVICE:-cpu}
+  FANTASY_TRAINING_THREADS: ${FANTASY_TRAINING_THREADS:-2}
+  FANTASY_TRAINING_TIMEOUT_SECONDS: ${FANTASY_TRAINING_TIMEOUT_SECONDS:-5400}
+  FANTASY_TRAINING_EPOCHS: ${FANTASY_TRAINING_EPOCHS:-30}
+
 services:
   backend:
     image: fantasy-football-ai-backend:gpu
@@ -14,6 +25,7 @@ services:
       - path: ./backend/.env
         required: false
     environment:
+      <<: *training-environment
       FANTASY_AUTH_ENABLED: "true"
       FANTASY_INSECURE_LOCAL_DEV: "false"
       FANTASY_PUBLIC_URL: ${FANTASY_PUBLIC_URL:-https://ffa.stefanb.me}
@@ -65,6 +77,42 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  trainer:
+    image: fantasy-football-ai-backend:gpu
+    command: ["python", "-m", "app.scripts.retrain_worker"]
+    init: true
+    restart: unless-stopped
+    cpus: ${TRAINING_CPUS:-2.0}
+    mem_limit: ${TRAINING_MEMORY_LIMIT:-4g}
+    pids_limit: 256
+    stop_grace_period: 30s
+    environment:
+      <<: *training-environment
+      FANTASY_HISTORY_PATH: /app/data/predictions.sqlite3
+      FANTASY_CACHE_PATH: /app/cache/runtime.sqlite3
+      OMP_NUM_THREADS: ${FANTASY_TRAINING_THREADS:-2}
+      MKL_NUM_THREADS: ${FANTASY_TRAINING_THREADS:-2}
+      OPENBLAS_NUM_THREADS: ${FANTASY_TRAINING_THREADS:-2}
+    volumes:
+      - projection-cache:/app/cache
+      - prediction-history:/app/data
+      - type: bind
+        source: ./backend/models/pytorch
+        target: /app/models/pytorch
+        read_only: true
+        bind:
+          create_host_path: false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   projection-cache:

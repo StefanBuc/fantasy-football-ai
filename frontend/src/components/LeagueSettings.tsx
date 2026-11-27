@@ -1,5 +1,6 @@
 import type { ESPNLeague } from '../types/api'
 import { MyTeamPicker } from './MyTeamPicker'
+import { RetrainingStatus } from './RetrainingStatus'
 
 type Props = {
   league: ESPNLeague
@@ -21,5 +22,6 @@ export function LeagueSettings({ league, myTeamId, onMyTeamChange, onOpenMyTeam 
         <MyTeamPicker teams={league.teams} value={myTeamId} onChange={onMyTeamChange} onOpen={onOpenMyTeam} />
       </div>
     </section>
+    <RetrainingStatus />
   </div>
 }

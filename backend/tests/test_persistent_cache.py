@@ -154,7 +154,7 @@ def snapshot_service(monkeypatch):
         service.player_df = pd.DataFrame({"player_id": ["a"], "season": [season]})
         service.defense_df = pd.DataFrame({"team": ["BUF"]})
     monkeypatch.setattr(weekly, "source_fingerprint", lambda: "source-v1")
-    monkeypatch.setattr(weekly, "model_fingerprint", lambda: "model-v1")
+    monkeypatch.setattr(weekly, "model_fingerprint", lambda paths=None: "model-v1")
     monkeypatch.setattr(weekly.WeeklyProjectionService, "_load_data", load)
     return calls
 
@@ -165,7 +165,7 @@ def test_snapshot_skips_downloads_and_preparation_after_restart(snapshot_service
     assert restored.generation == first.generation
     assert snapshot_service == [2024]
     pd.testing.assert_frame_equal(restored.player_df, first.player_df)
-    monkeypatch.setattr(weekly, "model_fingerprint", lambda: "model-v2")
+    monkeypatch.setattr(weekly, "model_fingerprint", lambda paths=None: "model-v2")
     changed_model = weekly.WeeklyProjectionService(2024)
     assert changed_model.generation != restored.generation
     assert snapshot_service == [2024]

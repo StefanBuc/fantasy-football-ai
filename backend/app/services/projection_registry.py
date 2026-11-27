@@ -2,6 +2,7 @@ from collections import OrderedDict
 from threading import Lock
 
 from app.services.weekly_projection_service import WeeklyProjectionService
+from app.services.model_registry import active_revision
 
 
 class ProjectionServiceRegistry:
@@ -12,11 +13,13 @@ class ProjectionServiceRegistry:
         self._lock = Lock()
         self._build_locks: dict[int, Lock] = {}
         self.max_entries = max_entries
+        self._revisions = {}
 
     def get(self, season: int, refresh: bool = False) -> WeeklyProjectionService:
+        revision = active_revision()
         with self._lock:
             previous = self._services.get(season)
-            if previous is not None and not refresh:
+            if previous is not None and not refresh and self._revisions.get(season) == revision:
                 self._services.move_to_end(season)
                 return previous
             build_lock = self._build_locks.setdefault(season, Lock())
@@ -25,7 +28,7 @@ class ProjectionServiceRegistry:
         with build_lock:
             with self._lock:
                 current = self._services.get(season)
-                if current is not None and (not refresh or current is not previous):
+                if current is not None and self._revisions.get(season) == revision and (not refresh or current is not previous):
                     self._services.move_to_end(season)
                     return current
             replacement = (
@@ -34,6 +37,7 @@ class ProjectionServiceRegistry:
             )
             with self._lock:
                 self._services[season] = replacement
+                self._revisions[season] = revision
                 self._services.move_to_end(season)
                 while len(self._services) > self.max_entries:
                     self._services.popitem(last=False)

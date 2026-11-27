@@ -11,6 +11,7 @@ from app.config.model_config import (
     SELECTED_PYTORCH_MODEL_VERSIONS,
 )
 from app.services.performance import logger
+from app.services.model_registry import selected_model_path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -97,6 +98,7 @@ def load_projection_checkpoint(checkpoint_path: str | Path, device: torch.device
 def load_selected_projection_checkpoint(
     position: str,
     device: torch.device | None = None,
+    checkpoint_path: str | Path | None = None,
 ):
     normalized_position = position.upper()
 
@@ -112,15 +114,8 @@ def load_selected_projection_checkpoint(
         normalized_position
     ]
 
-    checkpoint_path = (
-        BASE_DIR
-        / "models"
-        / "pytorch"
-        / (
-            f"{normalized_position}"
-            f"_model_v{version}.pth"
-        )
-    )
+    checkpoint_path = (Path(checkpoint_path) if checkpoint_path is not None else
+                       selected_model_path(normalized_position, BASE_DIR / "models/pytorch"))
 
     if not checkpoint_path.exists():
         raise FileNotFoundError(

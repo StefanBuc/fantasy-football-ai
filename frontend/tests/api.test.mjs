@@ -1,8 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getLiveScores, getOptimizedLineup, getTradeRosters, analyzeTrade } from '../src/lib/api.ts'
+import { getTeamProjections, getAccuracy, syncAccuracy, getAutomationStatus, getRetrainingStatus, getLiveScores, getOptimizedLineup, getTradeRosters, analyzeTrade } from '../src/lib/api.ts'
 
 const input = { league_id: 1, season: 2026, team_id: 1, week: 8 }
+
+test('retraining status is a read-only request without starting a training job', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{"state":"waiting"}')))
+  assert.deepEqual(await getRetrainingStatus(), { state: 'waiting' })
+  const [path, options] = fetch.mock.calls[0].arguments
+  assert.equal(path, '/api/training/status')
+  assert.equal(options.method, 'GET')
+  assert.equal(options.body, undefined)
+})
 
 test('trade roster selection is separate from analysis and local requests omit connection fields', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))

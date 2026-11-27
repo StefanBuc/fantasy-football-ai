@@ -90,6 +90,7 @@ class PyTorchProjectionService:
         player_df: pd.DataFrame,
         defense_df: pd.DataFrame,
         device: torch.device | None = None,
+        checkpoint_path=None,
     ):
         (
             self.model,
@@ -97,10 +98,7 @@ class PyTorchProjectionService:
             self.matchup_scaler,
             self.checkpoint,
             self.device,
-        ) = load_selected_projection_checkpoint(
-            position=position,
-            device=device,
-        )
+        ) = load_selected_projection_checkpoint(position=position, device=device, checkpoint_path=checkpoint_path)
 
         self.position = self.checkpoint["position"]
         self.matchup_cache: dict[tuple[str, int, int], dict[str, float]] = {}

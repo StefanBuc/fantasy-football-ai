@@ -11,12 +11,13 @@ import numpy as np
 RANGE_PATH = Path(__file__).resolve().parents[1] / "config" / "projection_ranges.json"
 
 
-def checkpoint_hashes():
+def checkpoint_hashes(paths=None):
+    from app.services.model_registry import selected_model_path
     from app.config.model_config import SELECTED_PYTORCH_MODEL_VERSIONS
     root = Path(__file__).resolve().parents[2] / "models" / "pytorch"
     return {position: sha256(path.read_bytes()).hexdigest()
             for position, version in SELECTED_PYTORCH_MODEL_VERSIONS.items()
-            if (path := root / f"{position}_model_v{version}.pth").is_file()}
+            if (path := (paths[position] if paths is not None else selected_model_path(position, root))).is_file()}
 
 
 def fit_residual_range(calibration, validation, minimum_calibration=100, minimum_validation=50):
@@ -51,8 +52,13 @@ def estimate_range(points, position, method, model_hashes):
         return empty
     position = position.replace("D/ST", "DST")
     try:
-        stat = RANGE_PATH.stat()
-        artifact = _read_ranges(str(RANGE_PATH), stat.st_mtime_ns, stat.st_size)
+        from app.services.model_registry import active_artifacts, artifact_path
+        deployed = active_artifacts(position)
+        while deployed and deployed["checkpoint_sha256"] != model_hashes.get(position):
+            deployed = deployed.get("previous")
+        path = artifact_path(deployed["ranges"]) if deployed else RANGE_PATH
+        stat = path.stat()
+        artifact = _read_ranges(str(path), stat.st_mtime_ns, stat.st_size)
         entry = artifact["positions"][position]
         fitted = entry["methods"][method]
         if not fitted["ready"] or entry["checkpoint_sha256"] != model_hashes.get(position):

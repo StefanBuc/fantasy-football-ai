@@ -14,6 +14,8 @@ models/
 *.db-*
 *.db.*
 *.automation.lock
+*.request.lock
+retraining/
 backups/
 
 # Encryption keys and runtime secret directories (including custom locations)

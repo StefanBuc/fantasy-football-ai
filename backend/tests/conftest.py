@@ -8,6 +8,9 @@ def isolated_disk_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("FANTASY_ACCOUNT_PATH", str(tmp_path / "accounts.sqlite3"))
     monkeypatch.setenv("FANTASY_ENCRYPTION_KEY_PATH", str(tmp_path / "secrets" / "credentials.key"))
     monkeypatch.setenv("FANTASY_AUTOMATION_ENABLED", "false")
+    monkeypatch.setenv("FANTASY_REQUEST_LIMITS_ENABLED", "false")
+    monkeypatch.setenv("FANTASY_CACHE_PATH", str(tmp_path / "runtime.sqlite3"))
+    monkeypatch.setenv("FANTASY_MODEL_RUNS_PATH", str(tmp_path / "retraining"))
     from app.services.disk_cache import disk_cache
 
     monkeypatch.setattr(disk_cache, "path", tmp_path / "runtime.sqlite3")

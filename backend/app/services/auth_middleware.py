@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.config.security import auth_enabled, cookie_name, public_origin, request_origin
 from app.services.account_store import accounts, AccountConfigurationError
 from app.services.performance import logger
+from app.services.request_limits import call_limited
 
 PUBLIC_PATHS = {"/api/auth/session", "/api/auth/login", "/api/health/", "/api/health/ready", "/api/public/performance"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -60,7 +61,7 @@ def security_headers(response):
 async def protect_request(request, call_next):
     request.state.owner_authenticated = False
     if not auth_enabled():
-        return await call_next(request)
+        return await call_limited(request, call_next)
     path = request.url.path
     try:
         origin = public_origin()
@@ -88,9 +89,9 @@ async def protect_request(request, call_next):
             if request.headers.get("origin") != origin or not session or not hmac.compare_digest(supplied.encode(), session["csrf"].encode()):
                 response = JSONResponse({"detail": "Your session security check expired. Reload the page and try again."}, status_code=403)
             else:
-                response = await call_next(request)
+                response = await call_limited(request, call_next)
         else:
-            response = await call_next(request)
+            response = await call_limited(request, call_next)
     except AccountConfigurationError as error:
         response = JSONResponse({"detail": str(error)}, status_code=503)
     except (sqlite3.Error, OSError, RequestException) as error:

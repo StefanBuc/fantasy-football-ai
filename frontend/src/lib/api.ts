@@ -1,5 +1,6 @@
 import type {
   AccuracyQuery,
+  RetrainingStatus,
   AccuracyReport,
   AccuracySyncResult,
   AutomationStatus,
@@ -239,6 +240,10 @@ export function syncAccuracy(season: number, leagueId?: number): Promise<Accurac
 export function getAutomationStatus(season: number, leagueId?: number): Promise<AutomationStatus> {
   const query = leagueId === undefined ? '' : `?league_id=${leagueId}`
   return sendJson<AutomationStatus>(`/api/accuracy/${season}/automation${query}`, undefined, 'GET')
+}
+
+export function getRetrainingStatus(): Promise<RetrainingStatus> {
+  return sendJson<RetrainingStatus>('/api/training/status', undefined, 'GET')
 }
 
 export function getLiveScores(input: { league_id: number; season: number; week: number;

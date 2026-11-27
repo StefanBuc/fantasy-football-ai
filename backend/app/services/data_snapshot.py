@@ -34,11 +34,12 @@ def source_fingerprint() -> str:
     return digest.hexdigest()
 
 
-def model_fingerprint() -> str:
+def model_fingerprint(paths=None) -> str:
+    from app.services.model_registry import selected_model_path
     root = Path(__file__).resolve().parents[2] / "models" / "pytorch"
     digest = sha256()
     for position, model_version in sorted(SELECTED_PYTORCH_MODEL_VERSIONS.items()):
-        path = root / f"{position}_model_v{model_version}.pth"
+        path = paths[position] if paths is not None else selected_model_path(position, root)
         digest.update(path.name.encode())
         digest.update(path.read_bytes() if path.exists() else b"missing")
     return digest.hexdigest()

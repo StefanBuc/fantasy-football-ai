@@ -18,6 +18,7 @@ from app.services.result_cache import ResultCache
 from app.services.performance import logger, timed_stage
 from app.services.prediction_history import record_predictions
 from app.services.projection_ranges import checkpoint_hashes
+from app.services.model_registry import selected_model_path
 
 from app.services.NFL_data import NFLData
 from app.services.projection_slate import (
@@ -66,8 +67,9 @@ class WeeklyProjectionService:
         if not restored:
             self._load_data(season)
             self._save_snapshot()
-        self.model_revision = model_fingerprint()
-        self.model_hashes = checkpoint_hashes()
+        self.model_paths = {position: selected_model_path(position) for position in SUPPORTED_POSITIONS}
+        self.model_revision = model_fingerprint(self.model_paths)
+        self.model_hashes = checkpoint_hashes(self.model_paths)
         self.generation = sha256(
             f"{self._data_generation}:{self.model_revision}".encode()
         ).hexdigest()
@@ -182,6 +184,7 @@ class WeeklyProjectionService:
                 self.position_services[normalized_position] = (
                     SpecialTeamsProjectionService(
                         position=normalized_position,
+                        checkpoint_path=self.model_paths[normalized_position],
                         weekly_df=self.special_teams_data[
                             normalized_position
                         ],
@@ -191,6 +194,7 @@ class WeeklyProjectionService:
                 self.position_services[normalized_position] = (
                     PyTorchProjectionService(
                         position=normalized_position,
+                        checkpoint_path=self.model_paths[normalized_position],
                         player_df=self.player_df,
                         defense_df=self.defense_df,
                     )

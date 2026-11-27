@@ -191,6 +191,23 @@ export type AccuracyMetrics = {
 
 export type AccuracyRosterCategory = 'starter' | 'bench' | 'free_agent' | 'unknown'
 
+export type RetrainingStatus = {
+  enabled: boolean
+  state: 'waiting' | 'running' | 'complete' | 'skipped' | 'error'
+  next_scheduled_at: string
+  worker_checked_at?: string
+  started_at?: string
+  finished_at?: string
+  retry_at?: string | null
+  note?: string | null
+  last_error?: string | null
+  current_position?: string | null
+  positions: Record<string, { promote: boolean; reason?: string; error?: string;
+    candidate_mae?: number; incumbent_mae?: number; count?: number }>
+  timezone: string
+  device: string
+}
+
 export type AccuracyRecord = {
   season: number
   week: number

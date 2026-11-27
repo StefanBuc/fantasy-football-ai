@@ -16,7 +16,7 @@ from app.services.special_teams_sequence_dataset import (
 
 
 class SpecialTeamsProjectionService:
-    def __init__(self, position: str, weekly_df, device=None):
+    def __init__(self, position: str, weekly_df, device=None, checkpoint_path=None):
         normalized_position = position.upper()
         if normalized_position not in {"K", "DST"}:
             raise ValueError(f"Unsupported position: {position}")
@@ -27,10 +27,7 @@ class SpecialTeamsProjectionService:
             self.matchup_scaler,
             self.checkpoint,
             self.device,
-        ) = load_selected_projection_checkpoint(
-            position=normalized_position,
-            device=device,
-        )
+        ) = load_selected_projection_checkpoint(position=normalized_position, device=device, checkpoint_path=checkpoint_path)
 
         self.position = normalized_position
         self.weekly_df = weekly_df.copy()

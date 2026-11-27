@@ -248,6 +248,40 @@ Opening a league remembers it as the next automatic connection. Open **Settings*
 
 For native localhost development, run `python -m app.scripts.manage_owner` once from `backend/`, start the API on port 8000, and run `npm run dev` from `frontend/`. Use Vite's normal same-origin `/api` proxy. No insecure-development flag or public-domain redirect is needed for loopback login. `FANTASY_PUBLIC_URL` defaults to `https://ffa.stefanb.me` if unset. The legacy `FANTASY_INSECURE_LOCAL_DEV=true` option is accepted only with a loopback public URL; it is unnecessary for ordinary localhost access. `FANTASY_AUTH_ENABLED=false` remains an explicit native-development/testing escape hatch; never expose it publicly, and Docker forces authentication on with insecure development off.
 
+## Expensive request limits
+
+Projection/data requests share a process-safe concurrency limit of **2**, a sliding budget of **60 requests per minute**, and a separate budget of **2 full data refreshes per five minutes**. These budgets apply across owner sessions, leagues, origins, and API workers; changing cookies or proxy IP headers does not reset them. A saturated request receives HTTP 429 with a readable message and `Retry-After` seconds. Existing login throttling remains separate. History/status reads, health checks, preferences, Homepage metrics, and live-score polling do not take projection slots. Locks release on request failure, cancellation, or API process exit; rate-window state stays in the existing cache volume.
+
+Set these in `backend/.env` before starting/recreating the backend: `FANTASY_REQUEST_LIMITS_ENABLED` (default `true`), `FANTASY_MAX_EXPENSIVE_REQUESTS` (`2`), `FANTASY_EXPENSIVE_REQUESTS_PER_MINUTE` (`60`), and `FANTASY_REFRESH_REQUESTS_PER_FIVE_MINUTES` (`2`). The guarded POST bodies are limited to 1 MiB. Authentication and CSRF checks happen before protected requests can spend a budget or start work. This is an application work limit, not a replacement for Cloudflare's network-level protections.
+
+## Automatic retraining and evaluation
+
+`docker compose up -d --build` also starts the **trainer** service, using the same backend image and persistent data/cache volumes. It trains one position at a time, separately from the API. The default weekly check is **Tuesday at 5 a.m. America/Toronto**, with catch-up after downtime and hourly retries on failures. Scheduled jobs defer during the six hours before and eight hours after NFL kickoffs. They wait for at least **11 fully completed regular-season weeks**, with published game scores and at least eight hours since every kickoff in the latest week. Retraining also waits for published player and D/ST statistics covering every scheduled team in that week; delayed statistics trigger hourly retries. This changes only retraining: the Accuracy results-sync timing remains separate. If the latest week is still settling at the Tuesday check, the worker retries hourly rather than training on the previous week or skipping until next Tuesday. Unchanged completed-week data does not trigger another automatic run. The worker resumes unfinished positions after interruption; already completed positions are preserved.
+
+Training uses published NFL player, snap-count, injury, and K/DST statistics, not league credentials or saved forecast history. Up to five prior seasons and the current season are prepared, caching per-season aggregate tables instead of keeping multi-season play-by-play in memory. Training ends ten weeks before the latest completed week. The next **2 weeks** choose the early-stopping epoch, **4 weeks** calibrate floor/ceiling residuals, and the final **4 weeks** evaluate the challenger and incumbent on exactly the same player games. Only training rows fit the scalers. For example, with 11 completed weeks, training includes prior seasons and current Week 1; Weeks 2–3 validate, 4–7 calibrate ranges, and 8–11 evaluate. This separation deliberately keeps recent outcomes out of model fitting until later runs.
+
+A position needs at least 200 training, 40 validation, 100 calibration, and 100 evaluation examples. Promotion requires the challenger to improve held-out MAE by both **0.10 points and 2%**, beat a rolling-average baseline, avoid increasing absolute bias by more than 0.5 points, and retain usable 80%-target bounds with 70–95% observed evaluation coverage. Invalid/nonfinite outputs or incompatible incumbent data boundaries reject the run. Passing a recent holdout does not guarantee better future accuracy; the Accuracy page continues to measure actual pregame forecasts independently.
+
+Candidates are written into immutable run directories and read back before promotion. An atomic manifest switches a position's checkpoint and matching ranges together, keeping previous artifacts for rollback. The API notices promotions without a restart and uses new projection-cache generations; in-flight services retain their pinned model files. The bundled model mount remains read-only. Existing predictions, results, saved ranges, roster observations, accounts, and automation enrollment are never rewritten by training.
+
+Open **Settings → Model retraining** for worker status, the next check, failures/retries, sample counts, and candidate-versus-incumbent errors. `/api/training/status` is an authenticated read and never starts training. Without a running worker, the page shows its missing/stale heartbeat rather than claiming training completed. Native development needs a separate terminal, from `backend/`:
+
+```powershell
+python -m app.scripts.retrain_worker
+```
+
+Docker defaults to CPU training with **2 CPUs**, **4 GiB memory**, two PyTorch threads, a 90-minute job timeout, at most 30 epochs per position, and validation early stopping. CUDA inference keeps using the configured GPU. Override training settings in the **project-root `.env`** for Compose (or `backend/.env` for a native worker): `FANTASY_RETRAIN_ENABLED`, `FANTASY_TRAINING_TIMEZONE`, `FANTASY_TRAINING_WEEKDAY` (Monday=0, Tuesday=1), `FANTASY_TRAINING_HOUR`, `FANTASY_TRAINING_DEVICE` (`cpu`, `auto`, or `cuda`), `FANTASY_TRAINING_THREADS`, `FANTASY_TRAINING_TIMEOUT_SECONDS`, and `FANTASY_TRAINING_EPOCHS`. Compose also accepts `TRAINING_CPUS` and `TRAINING_MEMORY_LIMIT`. `FANTASY_RETRAIN_ENABLED=false` disables scheduled training while keeping current models and ordinary accuracy tracking. The first real run downloads historical public data and can take longer; resource/time failures keep existing selections and retry later.
+
+Completed candidates, evaluation reports, status, and the active manifest live under `/app/data/retraining` in Docker's existing `prediction-history` volume (`backend/data/retraining` natively). `FANTASY_MODEL_RUNS_PATH` can override the native directory. These artifacts and request-lock files are Git-ignored; rebuilding images does not delete them. An operator can check once, run a job immediately, or roll a position back without changing historical predictions:
+
+```bash
+docker compose exec trainer python -m app.scripts.retrain_worker --once
+docker compose exec trainer python -m app.scripts.retrain_worker --run-now
+docker compose exec trainer python -m app.scripts.retrain_worker --rollback QB
+```
+
+The worker lock prevents simultaneous trainers. Manual `--run-now` intentionally bypasses the schedule/game-window delay, but retains evaluation and promotion gates. Failed work never overwrites the bundled checkpoints. Keep the persistent data volume to retain promoted models across container/server restarts.
+
 ## ESPN configuration
 
 The project uses the community-maintained `espn-api` package. Public leagues can be connected using their league ID and season. Private leagues require ESPN session-cookie credentials.
