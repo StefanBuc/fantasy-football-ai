@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 AccuracyPosition = Literal["QB", "RB", "WR", "TE", "K", "DST"]
+AccuracyRosterCategory = Literal["starter", "bench", "free_agent", "unknown"]
 
 
 class AccuracyMetrics(BaseModel):
@@ -52,6 +53,14 @@ class PredictionRecord(BaseModel):
     espn_scoring: str | None = None
     espn_recorded_at: str | None = None
     espn_error: float | None = None
+    roster_category: Literal["starter", "bench", "free_agent"] | None = None
+    roster_recorded_at: str | None = None
+
+
+class RosterCoverage(BaseModel):
+    total: int
+    recorded: int
+    unknown: int
 
 
 class RangeMetrics(BaseModel):
@@ -113,6 +122,7 @@ class AccuracyReport(BaseModel):
     season: int
     scoring: str
     summary: AccuracyMetrics
+    roster_coverage: RosterCoverage
     range_coverage: RangeCoverage
     error_distribution: ErrorDistribution
     espn_comparison: ESPNComparison

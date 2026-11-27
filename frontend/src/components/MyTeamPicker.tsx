@@ -22,20 +22,20 @@ export function MyTeamPicker({ teams, value, onChange, onOpen }: Props) {
     } finally { setBusy(false); setDraft(null) }
   }
 
-  return <div className="mx-auto max-w-7xl px-4 pb-4 sm:px-8">
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
-      <label className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
-        <span className="shrink-0 text-xs font-black text-slate-300">My team</span>
+  return <div>
+    <div className="flex flex-wrap items-end gap-3">
+      <label className="grid w-full min-w-0 gap-2 sm:w-auto">
+        <span className="text-xs font-black text-slate-500">My team</span>
         <select aria-label="My team" value={draft ?? (value === null ? '' : String(value))} disabled={busy} onChange={(event) => void save(event.target.value)}
-          className="h-10 min-w-0 max-w-full flex-1 rounded-lg border border-white/15 bg-slate-900 px-3 text-xs font-bold text-white outline-none focus:border-lime-300 sm:w-64 sm:max-w-xs">
+          className="h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 sm:w-80">
           <option value="">Choose your team</option>
           {teams.map((team) => <option key={team.team_id} value={team.team_id}>{team.team_name}</option>)}
         </select>
       </label>
       <button type="button" disabled={busy || value === null} onClick={onOpen}
-        className="rounded-lg border border-lime-300/30 px-3 py-2 text-xs font-bold text-lime-300 disabled:opacity-40">Go to my team</button>
-      <p role="status" className="min-w-0 flex-1 text-[11px] text-slate-400">{busy ? 'Saving your team...' : saved ? 'My team saved.' : 'Saved for this league. Browsing other teams keeps this choice.'}</p>
+        className="h-11 rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-40">Go to my team</button>
     </div>
-    {error && <p role="alert" className="mt-2 text-xs text-rose-300">{error}</p>}
+    <p role="status" className="mt-3 text-xs text-slate-500">{busy ? 'Saving your team...' : saved ? 'My team saved.' : 'Changes save automatically. Browsing other teams keeps this choice.'}</p>
+    {error && <p role="alert" className="mt-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
   </div>
 }

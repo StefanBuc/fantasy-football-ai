@@ -24,7 +24,7 @@ import { useLiveScores } from '../lib/useLiveScores'
 import { OptimizedLineupView } from './OptimizedLineupView'
 import { TradeAnalyzerView } from './TradeAnalyzerView'
 import type { DashboardView } from '../lib/account'
-import { MyTeamPicker } from './MyTeamPicker'
+import { LeagueSettings } from './LeagueSettings'
 
 export type ConnectionMode = 'public' | 'local'
 
@@ -319,7 +319,7 @@ export function LeagueDashboard({
       league.current_week, initialTeam)))
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<DashboardView>(initialView)
+  const [activeView, setActiveView] = useState<DashboardView | 'settings'>(initialView)
   const requestVersion = useRef(0)
   const [isRefreshingData, setIsRefreshingData] = useState(false)
 
@@ -416,7 +416,7 @@ export function LeagueDashboard({
 
   function changeTeam(teamId: number) {
     setSelectedTeamId(teamId)
-    onPreferencesChange?.(teamId, activeView)
+    if (activeView !== 'settings') onPreferencesChange?.(teamId, activeView)
     setProjection(null)
     setError(null)
   }
@@ -448,9 +448,12 @@ export function LeagueDashboard({
               <p className="text-xs font-semibold text-slate-400">Fantasy Football AI</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <ThemeToggle isDark={isDark} onToggle={onToggleDark} />
             {onHome && <button type="button" onClick={onHome} className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold">Home</button>}
+            {onMyTeamChange && <button type="button" onClick={() => setActiveView('settings')}
+              aria-current={activeView === 'settings' ? 'page' : undefined}
+              className={`rounded-lg border px-3 py-2 text-xs font-bold ${activeView === 'settings' ? 'border-lime-300 text-lime-300' : 'border-white/15'}`}>Settings</button>}
             {onSignOut && <button type="button" onClick={onSignOut} className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold">Sign out</button>}
             <button
               type="button"
@@ -461,7 +464,6 @@ export function LeagueDashboard({
             </button>
           </div>
         </div>
-        {onMyTeamChange && <MyTeamPicker teams={league.teams} value={myTeamId} onChange={onMyTeamChange} onOpen={() => changeView('team')} />}
         <nav className="mx-auto flex max-w-7xl gap-7 overflow-x-auto px-4 sm:px-8" aria-label="League navigation">
           {([
             ['team', 'My team'],
@@ -489,6 +491,8 @@ export function LeagueDashboard({
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-9">
+        {activeView === 'settings' && onMyTeamChange && <LeagueSettings league={league} myTeamId={myTeamId}
+          onMyTeamChange={onMyTeamChange} onOpenMyTeam={() => changeView('team')} />}
         {activeView === 'team' && (
           <>
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">

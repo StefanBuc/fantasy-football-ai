@@ -51,6 +51,7 @@ from app.services.weekly_projection_service import (
 from app.services.projection_registry import projection_services
 from app.services.prediction_history import record_predictions
 from app.services.espn_benchmark import espn_benchmark
+from app.services.roster_tracking import roster_category
 from app.services.accuracy_jobs import register_league_tracking
 from app.services.score_presentation import prediction_display
 from app.services.live_scores import live_response, LiveLeagueClient
@@ -385,6 +386,9 @@ def project_league_players(
             "predicted_points": player.predicted_points,
             "projection_method": player.projection_method,
             "availability": player.availability,
+            "roster_category": roster_category(
+                getattr(player_sources_by_id[player.espn_id], "lineupSlot", None),
+                free_agent=player.roster_status == "available"),
             **espn_benchmark(player_sources_by_id[player.espn_id], week),
         } for player in players if player.projection_status == "projected" and not player.is_on_bye],
     )
@@ -929,7 +933,9 @@ def build_team_projection_response(
     record_predictions(
         service, season=season, week=week, scope=f"espn:{league_id}",
         generated_at=cached_projection.generated_at,
-        samples=[{**player.model_dump(), **espn_benchmark(current_players.get(player.espn_id), week)} for player in players
+        samples=[{**player.model_dump(), **espn_benchmark(current_players.get(player.espn_id), week),
+                  "roster_category": roster_category(getattr(current_players.get(player.espn_id), "lineupSlot", None))}
+                 for player in players
                  if player.status == "projected" and not player.is_on_bye],
     )
 

@@ -768,6 +768,7 @@ def test_league_players_include_rostered_and_available(
     assert body["rostered_count"] == 1
     assert body["roster_week"] == 3
     assert archive.call_args.kwargs['samples'][0]['espn_predicted_points'] == 6
+    assert archive.call_args.kwargs['samples'][0]['roster_category'] == 'starter'
 
     players = {
         player["espn_id"]: player
@@ -869,3 +870,22 @@ def test_player_pool_cache_survives_restart_without_nfl_decoding(monkeypatch):
     service.data.get_projection_roster = Mock(side_effect=AssertionError("Unexpected NFL decoding"))
     second, _ = espn_route.project_league_players(league, 123, 2024, 1, service)
     assert second == first
+
+
+def test_pool_history_distinguishes_owned_bench_from_free_agent(monkeypatch):
+    from app.integrations.espn_roster_projection import ESPNRosterProjection
+
+    league = make_private_league()
+    league.teams[0].roster[0].lineupSlot = "IR"
+    league.free_agents = lambda **_: [SimpleNamespace(
+        playerId=502, name="Available Receiver", position="WR", lineupSlot="WR", proTeam="BUF")]
+    monkeypatch.setattr(espn_route, "project_espn_roster", lambda **kwargs: [
+        ESPNRosterProjection(player.espn_id, f"nfl-{player.espn_id}", player.player_name,
+                            player.position, player.lineup_slot, "BUF", "MIA", 10, "projected")
+        for player in kwargs["roster_players"]])
+    archive = Mock(return_value=0)
+    monkeypatch.setattr(espn_route, "record_predictions", archive)
+    espn_route.project_league_players(league, 123, 2024, 1, FakeESPNProjectionService())
+    saved = archive.call_args.kwargs["samples"]
+    assert {row["player_id"]: row["roster_category"] for row in saved} == {
+        "nfl-501": "bench", "nfl-502": "free_agent"}

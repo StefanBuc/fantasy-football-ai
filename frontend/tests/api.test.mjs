@@ -60,9 +60,9 @@ test('failed requests can be retried', async (t) => {
 
 test('accuracy reads use GET with filters and sync uses POST for the selected league', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response('{}')))
-  await getAccuracy({ season: 2026, league_id: 123, week: 10, position: 'QB', offset: 100 })
+  await getAccuracy({ season: 2026, league_id: 123, week: 10, position: 'QB', roster_category: 'starter', offset: 100 })
   const [path, options] = fetch.mock.calls[0].arguments
-  assert.equal(path, '/api/accuracy/2026?league_id=123&week=10&position=QB&offset=100')
+  assert.equal(path, '/api/accuracy/2026?league_id=123&week=10&position=QB&roster_category=starter&offset=100')
   assert.equal(options.method, 'GET')
   assert.equal(options.body, undefined)
   await syncAccuracy(2026, 123)

@@ -189,6 +189,8 @@ export type AccuracyMetrics = {
   bias: number | null
 }
 
+export type AccuracyRosterCategory = 'starter' | 'bench' | 'free_agent' | 'unknown'
+
 export type AccuracyRecord = {
   season: number
   week: number
@@ -213,6 +215,8 @@ export type AccuracyRecord = {
   espn_predicted_points: number | null
   espn_recorded_at: string | null
   espn_error: number | null
+  roster_category: Exclude<AccuracyRosterCategory, 'unknown'> | null
+  roster_recorded_at: string | null
 }
 
 export type RangeMetrics = {
@@ -229,6 +233,7 @@ export type AccuracyReport = {
   season: number
   scoring: string
   summary: AccuracyMetrics
+  roster_coverage: { total: number; recorded: number; unknown: number }
   range_coverage: RangeMetrics & { by_position: (RangeMetrics & { position: string })[] }
   error_distribution: {
     count: number; median_absolute_error: number | null; p90_absolute_error: number | null; rmse: number | null
@@ -249,6 +254,7 @@ export type AccuracyQuery = {
   league_id?: number
   week?: number
   position?: string
+  roster_category?: AccuracyRosterCategory
   offset?: number
 }
 

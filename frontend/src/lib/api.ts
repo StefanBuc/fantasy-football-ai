@@ -224,7 +224,7 @@ export function getTeamLogoUrl(
 
 export function getAccuracy(input: AccuracyQuery): Promise<AccuracyReport> {
   const params = new URLSearchParams()
-  for (const key of ['league_id', 'week', 'position', 'offset'] as const) {
+  for (const key of ['league_id', 'week', 'position', 'roster_category', 'offset'] as const) {
     const value = input[key]
     if (value !== undefined) params.set(key, String(value))
   }

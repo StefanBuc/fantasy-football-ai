@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getAccuracy, syncAccuracy, getAutomationStatus } from '../lib/api'
-import type { AccuracyReport, ESPNLeague, AutomationStatus } from '../types/api'
+import type { AccuracyReport, AccuracyRosterCategory, ESPNLeague, AutomationStatus } from '../types/api'
 import { AccuracyAutomation } from './AccuracyAutomation'
 import { AccuracyInsights } from './AccuracyInsights'
 
@@ -8,6 +8,7 @@ const positions = ['QB', 'RB', 'WR', 'TE', 'K', 'DST']
 const weeks = Array.from({ length: 18 }, (_, i) => i + 1)
 const seasons = Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => 2020 + i).reverse()
 const selectClass = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold disabled:opacity-50'
+const rosterLabels = { starter: 'Starters', bench: 'Bench / reserve', free_agent: 'Free agents', unknown: 'Not recorded' }
 const panelClass = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'
 
 function points(value: number | null, signed = false) {
@@ -23,6 +24,7 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
   const [source, setSource] = useState('league')
   const [week, setWeek] = useState('')
   const [position, setPosition] = useState('')
+  const [rosterCategory, setRosterCategory] = useState<AccuracyRosterCategory | ''>('')
   const [offset, setOffset] = useState(0)
   const [reload, setReload] = useState(0)
   const [loaded, setLoaded] = useState<{ key: string; report: AccuracyReport | null; error: string | null;
@@ -31,7 +33,7 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const leagueId = source === 'league' ? league.league_id : undefined
-  const requestKey = JSON.stringify([season, leagueId, week, position, offset, reload])
+  const requestKey = JSON.stringify([season, leagueId, week, position, rosterCategory, offset, reload])
   const loading = loaded?.key !== requestKey
   const report = loading ? null : loaded?.report
   const error = syncError ?? (loading ? null : loaded?.error)
@@ -44,7 +46,8 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
       pending = true
       const [history, automation] = await Promise.allSettled([
         getAccuracy({ season, league_id: leagueId, week: week ? Number(week) : undefined,
-          position: position || undefined, offset }), getAutomationStatus(season, leagueId),
+          position: position || undefined, roster_category: source === 'league' ? rosterCategory || undefined : undefined,
+          offset }), getAutomationStatus(season, leagueId),
       ])
       if (!cancelled) setLoaded({ key: requestKey,
         report: history.status === 'fulfilled' ? history.value : null,
@@ -57,7 +60,7 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
     void load()
     const timer = window.setInterval(() => { void load() }, 60_000)
     return () => { cancelled = true; window.clearInterval(timer) }
-  }, [requestKey, season, leagueId, week, position, offset])
+  }, [requestKey, season, leagueId, week, position, rosterCategory, source, offset])
 
   async function sync() {
     setSyncing(true)
@@ -110,11 +113,17 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
             </select>
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-500">History
-            <select value={source} disabled={syncing} onChange={(event) => { setSource(event.target.value); resetPage() }} className={selectClass}>
+            <select value={source} disabled={syncing} onChange={(event) => { setSource(event.target.value); setRosterCategory(''); resetPage() }} className={selectClass}>
               <option value="league">This league's projections</option>
               <option value="weekly">Weekly NFL projections</option>
             </select>
           </label>
+          {source === 'league' && <label className="grid gap-1 text-xs font-bold text-slate-500">Roster group
+            <select value={rosterCategory} disabled={syncing} onChange={(event) => { setRosterCategory(event.target.value as AccuracyRosterCategory | ''); resetPage() }} className={selectClass}>
+              <option value="">All players</option>
+              {Object.entries(rosterLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>}
           <label className="grid gap-1 text-xs font-bold text-slate-500">Week
             <select value={week} disabled={syncing} onChange={(event) => { setWeek(event.target.value); resetPage() }} className={selectClass}>
               <option value="">All weeks</option>
@@ -129,6 +138,9 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
           </label>
         </div>
         <p className="mt-4 text-xs leading-5 text-slate-500">{report?.scoring ?? 'Full PPR offense; app K/DST scoring. Custom ESPN scoring may differ.'} League history includes injury adjustments from scheduled captures and viewed pages. You can also sync manually after published stats arrive; this can take longer for K/DST. Missing stats stay pending.</p>
+        {source === 'league' && <p className="mt-2 text-xs leading-5 text-slate-500">Roster groups use the last observed status before each player's kickoff across this league. Bench includes IR and reserve slots. Older predictions and missing lineup slots stay Not recorded; today's roster is never used to classify past games.
+          {report?.roster_coverage && <> Status recorded for {report.roster_coverage.recorded} of {report.roster_coverage.total} predictions matching the season, week, and position filters; {report.roster_coverage.unknown} not recorded.</>}
+        </p>}
       </section>
 
       {!loading && <AccuracyAutomation status={loaded?.automation ?? null} error={loaded?.automationError ?? null} />}
@@ -163,7 +175,7 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
             </section>
             <section className={panelClass}>
               <h2 className="font-black">Weekly trend</h2>
-              <p className="mt-1 text-xs text-slate-500">All weeks in this season, using the position filter. Select a week to see its players.</p>
+              <p className="mt-1 text-xs text-slate-500">All weeks in this season, using the position and roster group filters. Select a week to see its players.</p>
               <div className="mt-4 space-y-3">{report.weekly_trend.map((row) => <div key={row.week} className="flex items-center gap-3 text-xs">
                 <button type="button" disabled={syncing} onClick={() => { setWeek(String(row.week)); resetPage() }} className="w-14 shrink-0 text-left font-bold underline">Week {row.week}</button>
                 <div className="h-3 flex-1 rounded-full bg-slate-100" aria-hidden="true"><div className="h-3 rounded-full bg-emerald-500" style={{ width: `${((row.mae ?? 0) / maxError) * 100}%` }} /></div>
@@ -183,9 +195,10 @@ export function AccuracyView({ league }: { league: ESPNLeague }) {
           <section className={`${panelClass} overflow-hidden`}>
             <h2 className="font-black">Projected vs. actual</h2>
             <div className="mt-4 overflow-x-auto"><table className="w-full min-w-175 text-right text-sm tabular-nums">
-              <thead className="text-xs text-slate-500"><tr><th className="pb-3 text-left">Player</th><th>Week</th><th>AI</th><th>ESPN · PPR</th><th>Actual</th><th>AI difference</th><th>Saved range</th><th>Saved before kickoff</th></tr></thead>
+              <thead className="text-xs text-slate-500"><tr><th className="pb-3 text-left">Player</th>{source === 'league' && <th>Roster group</th>}<th>Week</th><th>AI</th><th>ESPN · PPR</th><th>Actual</th><th>AI difference</th><th>Saved range</th><th>Saved before kickoff</th></tr></thead>
               <tbody>{report.records.map((row) => <tr key={`${row.week}:${row.position}:${row.player_id}`} className="border-t border-slate-100">
                 <th className="py-3 text-left"><p>{row.player_name ?? row.player_id}</p><p className="mt-1 text-xs font-normal text-slate-500">{row.position} · {row.team} vs {row.opponent_team} · {methodLabel(row.projection_method)}</p></th>
+                {source === 'league' && <td className="whitespace-nowrap text-xs text-slate-500" title={row.roster_recorded_at ? `Roster status observed ${new Date(row.roster_recorded_at).toLocaleString()}; frozen at kickoff` : 'No roster status was saved before kickoff'}>{rosterLabels[row.roster_category ?? 'unknown']}</td>}
                 <td>{row.week}</td><td>{points(row.predicted_points)}</td><td title={row.espn_recorded_at ? `ESPN projected stats converted to full PPR; observed ${new Date(row.espn_recorded_at).toLocaleString()}` : 'No ESPN forecast saved before kickoff'}>{points(row.espn_predicted_points ?? null)}</td><td>{row.actual_points === null ? <span className="text-xs text-slate-500">Pending</span> : points(row.actual_points)}</td><td>{points(row.error, true)}</td>
                 <td className="whitespace-nowrap text-xs text-slate-500">{row.floor_points != null && row.ceiling_points != null ? <>{points(row.floor_points)}–{points(row.ceiling_points)}<span className="block">{row.range_result === 'inside' ? 'Inside range' : row.range_result === 'below' ? 'Below floor' : row.range_result === 'above' ? 'Above ceiling' : 'Awaiting result'}</span></> : 'Not saved'}</td>
                 <td className="text-xs text-slate-500" title={`Generated: ${new Date(row.generated_at).toLocaleString()} | Kickoff: ${new Date(row.kickoff).toLocaleString()} | ${row.model_version} ${row.model_revision}`}>{new Date(row.recorded_at).toLocaleString()}</td>

@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query
 from filelock import Timeout
 
-from app.schemas.accuracy import AccuracyPosition, AccuracyReport, SyncResult, AutomationStatus
+from app.schemas.accuracy import AccuracyPosition, AccuracyReport, SyncResult, AutomationStatus, AccuracyRosterCategory
 from app.services.prediction_history import prediction_history
 from app.services.prediction_actuals import sync_actuals
 from app.services.performance import logger
@@ -26,10 +26,12 @@ def history_scope(league_id):
 def get_accuracy(season: Season, league_id: League = None,
                  week: Annotated[int | None, Query(ge=1, le=18)] = None,
                  position: AccuracyPosition | None = None,
+                 roster_category: AccuracyRosterCategory | None = None,
                  limit: Annotated[int, Query(ge=1, le=200)] = 100,
                  offset: Annotated[int, Query(ge=0)] = 0):
     try:
-        return prediction_history.report(season, history_scope(league_id), week, position, limit, offset)
+        return prediction_history.report(season, history_scope(league_id), week, position, limit, offset,
+                                         roster_category=roster_category)
     except (OSError, sqlite3.Error) as error:
         logger.warning("Prediction history unavailable: %s", error)
         raise HTTPException(503, "Prediction history could not be opened. Check the backend data directory.") from error

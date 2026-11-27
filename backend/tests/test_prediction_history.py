@@ -271,8 +271,14 @@ def test_espn_cached_response_archives_displayed_injury_adjustment(monkeypatch):
     assert response.players[0].predicted_points == 0
     assert prediction_history.rows(2026, "espn:123")[0]["predicted_points"] == 0
     assert prediction_history.rows(2026, "espn:123")[0]["espn_predicted_points"] == 10
+    assert prediction_history.rows(2026, "espn:123")[0]["roster_category"] == "starter"
+    player.lineupSlot = "BE"  # The cached projection still says QB.
+    espn.build_team_projection_response(league, 123, 2026, 1, 10, service)
+    assert prediction_history.rows(2026, "espn:123")[0]["roster_category"] == "bench"
     player.injuryStatus = "ACTIVE"
+    player.lineupSlot = "QB"
     monkeypatch.setattr(history_module, "utc_now", lambda: KICKOFF)
     response = espn.build_team_projection_response(league, 123, 2026, 1, 10, service)
     assert response.players[0].predicted_points == 20
     assert prediction_history.rows(2026, "espn:123")[0]["predicted_points"] == 0
+    assert prediction_history.rows(2026, "espn:123")[0]["roster_category"] == "bench"

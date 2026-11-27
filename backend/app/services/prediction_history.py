@@ -73,7 +73,8 @@ class PredictionHistory:
             )""")
             range_columns = {"floor_points": "REAL", "ceiling_points": "REAL",
                              "range_note": "TEXT", "range_revision": "TEXT",
-                             "espn_predicted_points": "REAL", "espn_scoring": "TEXT", "espn_recorded_at": "TEXT"}
+                             "espn_predicted_points": "REAL", "espn_scoring": "TEXT", "espn_recorded_at": "TEXT",
+                             "roster_category": "TEXT", "roster_recorded_at": "TEXT"}
             existing = {row[1] for row in connection.execute("PRAGMA table_info(predictions)")}
             if not set(range_columns).issubset(existing):
                 with connection:
@@ -131,6 +132,18 @@ class PredictionHistory:
                             AND actual_points IS NULL AND (espn_recorded_at IS NULL OR espn_recorded_at<=?)""",
                         (float(espn_points), ESPN_SCORING, now.isoformat(), scope, season, week, position, str(player_id),
                          team, opponent, kickoff.isoformat(), now.isoformat(), now.isoformat()))
+                category = sample.get("roster_category") if scope.startswith("espn:") else None
+                if category not in {"starter", "bench", "free_agent"}:
+                    category = None
+                if category is not None:
+                    # Lineup observations can be newer than cached AI output.
+                    # Freeze them at kickoff using the same game identity as the forecast.
+                    connection.execute("""UPDATE predictions SET roster_category=?,roster_recorded_at=?
+                        WHERE scope=? AND season=? AND week=? AND position=? AND player_id=?
+                            AND team=? AND opponent_team=? AND kickoff=? AND kickoff>?
+                            AND actual_points IS NULL AND (roster_recorded_at IS NULL OR roster_recorded_at<=?)""",
+                        (category, now.isoformat(), scope, season, week, position, str(player_id),
+                         team, opponent, kickoff.isoformat(), now.isoformat(), now.isoformat()))
                 values = (
                     scope, season, week, str(player_id), sample.get("player_name"), position,
                     team, opponent, float(points), sample.get("projection_method") or "model",
@@ -139,13 +152,14 @@ class PredictionHistory:
                     bounds["floor_points"], bounds["ceiling_points"], bounds["range_note"], bounds["range_revision"],
                     float(espn_points) if has_espn else None, ESPN_SCORING if has_espn else None,
                     now.isoformat() if has_espn else None,
+                    category, now.isoformat() if category is not None else None,
                 )
                 cursor = connection.execute("""INSERT INTO predictions (
                     scope, season, week, player_id, player_name, position, team, opponent_team,
                     predicted_points, projection_method, model_version, model_revision,
                     generated_at, recorded_at, kickoff, floor_points, ceiling_points, range_note, range_revision,
-                    espn_predicted_points, espn_scoring, espn_recorded_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    espn_predicted_points, espn_scoring, espn_recorded_at, roster_category, roster_recorded_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(scope,season,week,position,player_id) DO UPDATE SET
                         player_name=excluded.player_name, team=excluded.team,
                         opponent_team=excluded.opponent_team,
@@ -161,7 +175,11 @@ class PredictionHistory:
                         espn_scoring=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
                             AND predictions.kickoff=excluded.kickoff THEN predictions.espn_scoring ELSE excluded.espn_scoring END,
                         espn_recorded_at=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
-                            AND predictions.kickoff=excluded.kickoff THEN predictions.espn_recorded_at ELSE excluded.espn_recorded_at END
+                            AND predictions.kickoff=excluded.kickoff THEN predictions.espn_recorded_at ELSE excluded.espn_recorded_at END,
+                        roster_category=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
+                            AND predictions.kickoff=excluded.kickoff THEN predictions.roster_category ELSE excluded.roster_category END,
+                        roster_recorded_at=CASE WHEN predictions.team=excluded.team AND predictions.opponent_team=excluded.opponent_team
+                            AND predictions.kickoff=excluded.kickoff THEN predictions.roster_recorded_at ELSE excluded.roster_recorded_at END
                     WHERE predictions.kickoff > excluded.recorded_at
                         AND predictions.generated_at <= excluded.generated_at
                         AND predictions.actual_points IS NULL""", values)
@@ -187,9 +205,13 @@ class PredictionHistory:
                     WHERE scope=? AND season=? AND week=? AND position=? AND player_id=?""",
                     (points, utc_now().isoformat(), *key))
 
-    def report(self, season, scope, week=None, position=None, limit=100, offset=0):
+    def report(self, season, scope, week=None, position=None, limit=100, offset=0, roster_category=None):
         rows = self.rows(season, scope)
         trend_rows = [row for row in rows if position is None or row["position"] == position]
+        coverage_rows = [row for row in trend_rows if week is None or row["week"] == week]
+        known = sum(row.get("roster_category") is not None for row in coverage_rows)
+        if roster_category is not None:
+            trend_rows = [row for row in trend_rows if (row.get("roster_category") or "unknown") == roster_category]
         filtered = [row for row in trend_rows if week is None or row["week"] == week]
 
         def metrics(items):
@@ -206,6 +228,8 @@ class PredictionHistory:
             row["espn_error"] = row["espn_predicted_points"] - row["actual_points"] if paired(row) and row["actual_points"] is not None else None
         return {
             "season": season, "scoring": SCORING, "summary": metrics(filtered),
+            "roster_coverage": {"total": len(coverage_rows), "recorded": known,
+                                "unknown": len(coverage_rows) - known},
             **insights(filtered),
             "by_position": [{"position": value, **metrics([row for row in filtered if row["position"] == value])}
                             for value in ("QB", "RB", "WR", "TE", "K", "DST")],
